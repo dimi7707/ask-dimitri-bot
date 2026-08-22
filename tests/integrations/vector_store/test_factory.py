@@ -41,6 +41,14 @@ def test_get_vector_store_provider_dispatches_to_the_configured_provider(monkeyp
     assert isinstance(provider, FakeVectorStoreProvider)
 
 
+def test_get_vector_store_provider_defaults_to_pgvector():
+    from app.integrations.vector_store.pgvector_provider import PgVectorStoreProvider
+
+    provider = vector_store_factory.get_vector_store_provider(settings=Settings(_env_file=None))
+
+    assert isinstance(provider, PgVectorStoreProvider)
+
+
 def test_get_vector_store_provider_raises_on_unregistered_provider():
     settings = Settings(_env_file=None, vector_store_provider="does-not-exist")
 
