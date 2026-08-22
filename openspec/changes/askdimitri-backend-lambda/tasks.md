@@ -11,7 +11,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 ## 1. Project Bootstrap
 
 - [x] 1.1 Initialize git repository at the current directory root (no nested project folder) and add a Python `.gitignore` (venv, `__pycache__`, `.env`, `.terraform`, etc.)
-- [ ] 1.2 Initialize `pyproject.toml` via `uv` with project metadata and base dependencies (fastapi, mangum, uvicorn)
+- [x] 1.2 Initialize `pyproject.toml` via `uv` with project metadata and base dependencies (fastapi, mangum, uvicorn)
 - [ ] 1.3 Create the base repo structure from design.md: `app/`, `app/api/routes/`, `app/core/`, `app/services/`, `app/models/`, `app/integrations/`, `ingestion/`, `docker/`, `postman/`, `infra/terraform/` (placeholder `.gitkeep`)
 - [ ] 1.4 Add `Makefile` skeleton with `dev`, `test`, `down`, `migrate`, `ingest` targets (implemented incrementally as their dependencies land)
 
