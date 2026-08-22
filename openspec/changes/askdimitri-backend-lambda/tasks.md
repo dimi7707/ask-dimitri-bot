@@ -19,7 +19,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 - [x] 2.1 Add `pydantic-settings`-based `app/core/config.py` with a `Settings` class covering all env vars from the spec (`BEDROCK_MODEL_ID`, `EMBEDDING_MODEL_ID`, `SIMILARITY_THRESHOLD`, `INCLUDE_DEBUG_CONTEXT`, provider selectors, DB DSN, storage endpoint) with sane local-dev defaults
 - [x] 2.2 Write a unit test asserting `Settings` loads defaults and honors environment variable overrides
-- [ ] 2.3 Create `app/main.py` with a minimal FastAPI app instance and the Mangum handler (`handler = Mangum(app)`)
+- [x] 2.3 Create `app/main.py` with a minimal FastAPI app instance and the Mangum handler (`handler = Mangum(app)`)
 
 ## 3. Integration Abstraction Layer (Protocols + Factories)
 
