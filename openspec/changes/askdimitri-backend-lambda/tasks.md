@@ -24,7 +24,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 ## 3. Integration Abstraction Layer (Protocols + Factories)
 
 - [x] 3.1 Write unit tests for a `StorageProvider` protocol contract (upload/download/list/delete) using an in-memory fake, and add `app/integrations/storage/base.py` + `factory.py` to satisfy them
-- [ ] 3.2 Write unit tests for an `EmbeddingProvider` protocol contract (`embed(text) -> list[float]`) using a fake, and add `app/integrations/embeddings/base.py` + `factory.py`
+- [x] 3.2 Write unit tests for an `EmbeddingProvider` protocol contract (`embed(text) -> list[float]`) using a fake, and add `app/integrations/embeddings/base.py` + `factory.py`
 - [ ] 3.3 Write unit tests for a `GenerationProvider` protocol contract (`generate(system_prompt, question, context) -> str`) using a fake, and add `app/integrations/generation/base.py` + `factory.py`
 - [ ] 3.4 Write unit tests for a `VectorStoreProvider` protocol contract (`upsert_chunks`, `delete_by_document_id`, `similarity_search`) using a fake, and add `app/integrations/vector_store/base.py` + `factory.py`
 - [ ] 3.5 Write unit tests for a `DocumentProcessor` protocol contract (`load_and_chunk(path) -> list[Chunk]`) using a fake, and add `app/integrations/document_processing/base.py` + `factory.py`
