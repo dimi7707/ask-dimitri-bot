@@ -32,8 +32,8 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 ## 4. Health Check (spec: `health-check`)
 
-- [ ] 4.1 Write a test for `GET /health` asserting HTTP 200 and a healthy-status body with all dependencies mocked/unavailable
-- [ ] 4.2 Implement `app/api/routes/health.py` and wire it into `app/main.py` to pass the test
+- [x] 4.1 Write a test for `GET /health` asserting HTTP 200 and a healthy-status body with all dependencies mocked/unavailable
+- [x] 4.2 Implement `app/api/routes/health.py` and wire it into `app/main.py` to pass the test
 
 ## 5. Vector Store Provider & Data Model
 
