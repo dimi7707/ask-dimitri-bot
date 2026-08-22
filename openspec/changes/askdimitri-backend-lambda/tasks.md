@@ -27,7 +27,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 - [x] 3.2 Write unit tests for an `EmbeddingProvider` protocol contract (`embed(text) -> list[float]`) using a fake, and add `app/integrations/embeddings/base.py` + `factory.py`
 - [x] 3.3 Write unit tests for a `GenerationProvider` protocol contract (`generate(system_prompt, question, context) -> str`) using a fake, and add `app/integrations/generation/base.py` + `factory.py`
 - [x] 3.4 Write unit tests for a `VectorStoreProvider` protocol contract (`upsert_chunks`, `delete_by_document_id`, `similarity_search`) using a fake, and add `app/integrations/vector_store/base.py` + `factory.py`
-- [ ] 3.5 Write unit tests for a `DocumentProcessor` protocol contract (`load_and_chunk(path) -> list[Chunk]`) using a fake, and add `app/integrations/document_processing/base.py` + `factory.py`
+- [x] 3.5 Write unit tests for a `DocumentProcessor` protocol contract (`load_and_chunk(path) -> list[Chunk]`) using a fake, and add `app/integrations/document_processing/base.py` + `factory.py`
 - [ ] 3.6 Confirm (via a lint/import-check test or manual grep) that no module outside `app/integrations/*/**_provider.py` imports `boto3`, `langchain`, or `llama_index`
 
 ## 4. Health Check (spec: `health-check`)
