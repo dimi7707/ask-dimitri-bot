@@ -19,7 +19,9 @@ class RetrievedChunk:
 
 @runtime_checkable
 class VectorStoreProvider(Protocol):
-    """Chunk persistence + similarity search — implemented by pgvector today."""
+    """Document/chunk persistence + similarity search — implemented by pgvector today."""
+
+    def upsert_document(self, document_id: str, filename: str, doc_type: str, version: str) -> None: ...
 
     def upsert_chunks(self, document_id: str, chunks: list[EmbeddedChunk]) -> None: ...
 

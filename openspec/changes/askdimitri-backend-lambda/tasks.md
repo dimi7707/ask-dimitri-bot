@@ -39,8 +39,8 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 - [x] 5.1 Add SQLModel models for `documents` and `document_chunks` per the confirmed schema (section 9 of the spec doc), including `pgvector.sqlalchemy.Vector(1024)` for `embedding`
 - [x] 5.2 Add Alembic setup and initial migration creating both tables with the `vector_cosine_ops` index strategy (no HNSW yet, per design)
-- [ ] 5.3 Write tests for `pgvector_provider` (`upsert_chunks`, `delete_by_document_id`, `similarity_search`) against a real Postgres+pgvector test container
-- [ ] 5.4 Implement `app/integrations/vector_store/pgvector_provider.py` to pass those tests
+- [x] 5.3 Write tests for `pgvector_provider` (`upsert_chunks`, `delete_by_document_id`, `similarity_search`) against a real Postgres+pgvector test container
+- [x] 5.4 Implement `app/integrations/vector_store/pgvector_provider.py` to pass those tests
 - [ ] 5.5 Wire `VECTOR_STORE_PROVIDER=pgvector` as the default in the factory
 
 ## 6. Storage Provider (S3 / LocalStack)

@@ -7,7 +7,11 @@ from app.integrations.vector_store.base import EmbeddedChunk, RetrievedChunk, Ve
 
 class FakeVectorStoreProvider:
     def __init__(self):
+        self._documents: dict[str, dict] = {}
         self._chunks_by_document: dict[str, list[EmbeddedChunk]] = {}
+
+    def upsert_document(self, document_id: str, filename: str, doc_type: str, version: str) -> None:
+        self._documents[document_id] = {"filename": filename, "doc_type": doc_type, "version": version}
 
     def upsert_chunks(self, document_id: str, chunks: list[EmbeddedChunk]) -> None:
         self._chunks_by_document[document_id] = chunks
@@ -48,6 +52,7 @@ def test_fake_vector_store_upsert_delete_and_similarity_search():
     provider = FakeVectorStoreProvider()
     chunk = EmbeddedChunk(chunk_text="Dimitri uses Python", embedding=[0.1, 0.2], chunk_index=0)
 
+    provider.upsert_document("doc-1", filename="cv.pdf", doc_type="cv", version="v1")
     provider.upsert_chunks("doc-1", [chunk])
     results = provider.similarity_search(query_embedding=[0.1, 0.2], top_k=5)
 
