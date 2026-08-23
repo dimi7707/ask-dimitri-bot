@@ -47,7 +47,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 - [x] 6.1 Write tests for `s3_provider` (upload/download/list/delete) against a LocalStack S3 endpoint
 - [x] 6.2 Implement `app/integrations/storage/s3_provider.py` (boto3-based, endpoint URL from `Settings`) to pass those tests
-- [ ] 6.3 Wire `STORAGE_PROVIDER=s3` as the default in the factory
+- [x] 6.3 Wire `STORAGE_PROVIDER=s3` as the default in the factory
 
 ## 7. Embedding & Generation Providers (Bedrock)
 

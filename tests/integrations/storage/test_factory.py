@@ -35,6 +35,14 @@ def test_get_storage_provider_dispatches_to_the_configured_provider(monkeypatch)
     assert isinstance(provider, FakeStorageProvider)
 
 
+def test_get_storage_provider_defaults_to_s3():
+    from app.integrations.storage.s3_provider import S3StorageProvider
+
+    provider = storage_factory.get_storage_provider(settings=Settings(_env_file=None))
+
+    assert isinstance(provider, S3StorageProvider)
+
+
 def test_get_storage_provider_raises_on_unregistered_provider():
     settings = Settings(_env_file=None, storage_provider="does-not-exist")
 
