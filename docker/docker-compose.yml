@@ -1,0 +1,75 @@
+# Local dev stack: API + Postgres/pgvector + LocalStack S3.
+# Host ports are deliberately non-standard (55432 / 45660) so the stack never collides with a
+# locally installed Postgres or LocalStack — they are also the ports the provider tests default to.
+name: askdimitri
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: askdimitri
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d askdimitri"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  localstack:
+    image: localstack/localstack:3
+    environment:
+      SERVICES: s3
+      # Any value works: LocalStack ignores credential values but boto3 still signs requests.
+      AWS_DEFAULT_REGION: ${AWS_REGION:-us-east-1}
+    ports:
+      - "45660:4566"
+    volumes:
+      - ./localstack/init-s3.sh:/etc/localstack/init/ready.d/init-s3.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Service names, not localhost: these are resolved on the compose network.
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@postgres:5432/askdimitri
+      S3_ENDPOINT_URL: http://localstack:4566
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-askdimitri-documents}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      BEDROCK_MODEL_ID: ${BEDROCK_MODEL_ID:-amazon.nova-micro-v1:0}
+      EMBEDDING_MODEL_ID: ${EMBEDDING_MODEL_ID:-amazon.titan-embed-text-v2:0}
+      SIMILARITY_THRESHOLD: ${SIMILARITY_THRESHOLD:-0.6}
+      SIMILARITY_TOP_K: ${SIMILARITY_TOP_K:-5}
+      INCLUDE_DEBUG_CONTEXT: ${INCLUDE_DEBUG_CONTEXT:-true}
+      CHUNK_SIZE: ${CHUNK_SIZE:-512}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-50}
+      # Bedrock has no local emulation, so these must be real credentials for /chat to answer.
+      # Everything else (health, storage, vector store) works without them.
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    volumes:
+      # Bind-mount the repo for hot reload; the anonymous volume keeps the image's Linux venv
+      # from being shadowed by the host's (macOS-built) .venv.
+      - ..:/app
+      - /app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
