@@ -147,3 +147,27 @@ def test_retrieval_uses_the_configured_top_k():
 
     assert embedder.embedded_texts == [SPANISH_QUESTION]
     assert vector_store.searches == [([0.1, 0.2, 0.3], 3)]
+
+
+# --- 11.2 off-topic rejection --------------------------------------------------------------
+
+
+def test_off_topic_question_is_declined_politely():
+    client, _, _, _ = build_client(in_scope=False)
+
+    response = client.post("/chat", json={"question": "¿Cuál es la capital de Francia?"})
+
+    assert response.status_code == 200
+    assert "perfil profesional de Dimitri" in response.json()["answer"]
+
+
+def test_off_topic_question_never_reaches_the_vector_store():
+    client, embedder, vector_store, generator = build_client(
+        in_scope=False, chunks=[chunk("no deberia consultarse", 0.99)]
+    )
+
+    client.post("/chat", json={"question": "¿Cuál es la capital de Francia?"})
+
+    assert vector_store.searches == []
+    assert embedder.embedded_texts == []
+    assert generator.answer_calls == []
