@@ -54,7 +54,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 - [x] 7.1 Write tests for `bedrock_embedding_provider` with the Bedrock client mocked at the boundary, covering a successful embed call and an error path
 - [x] 7.2 Implement `app/integrations/embeddings/bedrock_provider.py` (Titan Embeddings V2, model id from `Settings.EMBEDDING_MODEL_ID`) to pass those tests
 - [x] 7.3 Write tests for `bedrock_generation_provider` with LangChain's `ChatBedrock` mocked at the boundary, covering a successful generation call and an error path
-- [ ] 7.4 Implement `app/integrations/generation/bedrock_provider.py` (Nova Micro, model id from `Settings.BEDROCK_MODEL_ID`) to pass those tests
+- [x] 7.4 Implement `app/integrations/generation/bedrock_provider.py` (Nova Micro, model id from `Settings.BEDROCK_MODEL_ID`) to pass those tests
 - [ ] 7.5 Wire `EMBEDDING_PROVIDER=bedrock` and `LLM_PROVIDER=bedrock` as defaults in their factories
 
 ## 8. Document Processing Provider (LlamaIndex)

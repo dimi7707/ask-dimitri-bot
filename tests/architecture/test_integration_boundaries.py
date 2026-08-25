@@ -2,7 +2,8 @@ import ast
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[2] / "app"
-FORBIDDEN_TOP_LEVEL_MODULES = {"boto3", "botocore", "langchain", "llama_index"}
+# Prefixes, so distribution-specific packages (langchain_aws, llama_index_core, ...) are caught too.
+FORBIDDEN_MODULE_PREFIXES = ("boto3", "botocore", "langchain", "llama_index")
 
 
 def _imported_top_level_modules(source_path: Path) -> set[str]:
@@ -25,7 +26,11 @@ def test_no_module_outside_provider_files_imports_a_raw_sdk_or_framework():
     for source_path in APP_ROOT.rglob("*.py"):
         if _is_allowed_provider_file(source_path):
             continue
-        forbidden_imports = _imported_top_level_modules(source_path) & FORBIDDEN_TOP_LEVEL_MODULES
+        forbidden_imports = {
+            module
+            for module in _imported_top_level_modules(source_path)
+            if module.startswith(FORBIDDEN_MODULE_PREFIXES)
+        }
         if forbidden_imports:
             violations.append(f"{source_path.relative_to(APP_ROOT)}: imports {sorted(forbidden_imports)}")
 
