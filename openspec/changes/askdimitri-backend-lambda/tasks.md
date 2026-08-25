@@ -102,6 +102,6 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 ## 14. Lambda Packaging & Docs
 
-- [ ] 14.1 Add a production-mode Lambda container image `docker/Dockerfile.lambda` (or a build stage) exposing the Mangum `handler`
+- [x] 14.1 Add a production-mode Lambda container image `docker/Dockerfile.lambda` (or a build stage) exposing the Mangum `handler`
 - [ ] 14.2 Document manual AWS console setup steps (API Gateway, Lambda from container image, Aurora PostgreSQL+pgvector, Bedrock model access for Nova Micro + Titan V2) in `README.md`, to serve as the source of truth for the later Terraform phase
 - [ ] 14.3 Document the full local dev workflow (`make dev`, `make ingest`, `make test`, Postman usage) in `README.md`

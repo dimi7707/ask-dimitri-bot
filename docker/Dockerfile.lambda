@@ -1,0 +1,25 @@
+# Production image: the same FastAPI app served through the Mangum handler on AWS Lambda.
+# Container image rather than a zip because LlamaIndex + LangChain + boto3 exceed the practical
+# zip/layer limits (see design.md, decision 4).
+#
+# Build from the repository root:
+#   docker build -f docker/Dockerfile.lambda -t askdimitri-backend:latest .
+FROM public.ecr.aws/lambda/python:3.12
+
+COPY --from=ghcr.io/astral-sh/uv:0.9.9 /uv /usr/local/bin/uv
+
+ENV UV_LINK_MODE=copy \
+    PYTHONDONTWRITEBYTECODE=1
+
+# Dependencies first: source changes must not invalidate this layer, which dominates build time.
+# Installed into LAMBDA_TASK_ROOT (not a venv) because that is what the Lambda runtime imports from.
+COPY pyproject.toml uv.lock ./
+RUN uv export --frozen --no-dev --no-emit-project --format requirements.txt > requirements.txt \
+    && uv pip install --no-cache --target "${LAMBDA_TASK_ROOT}" -r requirements.txt \
+    && rm requirements.txt
+
+COPY app/ ${LAMBDA_TASK_ROOT}/app/
+
+# `app.main.handler` is the Mangum adapter defined in app/main.py — set this same value as the
+# Lambda function's handler when creating the function from this image.
+CMD ["app.main.handler"]
