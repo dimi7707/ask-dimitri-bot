@@ -96,9 +96,9 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 ## 13. Postman Collection
 
-- [ ] 13.1 Create `postman/askdimitri.postman_collection.json` with `GET /health` and `POST /chat` requests
-- [ ] 13.2 Add `/chat` test-case requests: in-scope question, off-topic question, ambiguous/low-similarity question, English question
-- [ ] 13.3 Create `postman/askdimitri.postman_environment.json` with a `base_url` variable defaulting to `http://localhost:8000`
+- [x] 13.1 Create `postman/askdimitri.postman_collection.json` with `GET /health` and `POST /chat` requests
+- [x] 13.2 Add `/chat` test-case requests: in-scope question, off-topic question, ambiguous/low-similarity question, English question
+- [x] 13.3 Create `postman/askdimitri.postman_environment.json` with a `base_url` variable defaulting to `http://localhost:8000`
 
 ## 14. Lambda Packaging & Docs
 
