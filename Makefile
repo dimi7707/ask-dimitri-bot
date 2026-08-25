@@ -16,6 +16,8 @@ test:
 migrate:
 	uv run alembic upgrade head
 
-## Run the standalone ingestion script against the local stack
+## Run the standalone ingestion script against the local stack (reads .env).
+## Ingests every supported document in the bucket, or specific keys:
+##   make ingest ARGS="documents/cv.pdf documents/profile.pdf"
 ingest:
-	uv run python -m ingestion.ingest
+	uv run python -m ingestion.ingest $(ARGS)
