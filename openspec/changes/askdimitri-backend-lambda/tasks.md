@@ -89,7 +89,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 ## 12. Local Dev Environment (spec: `local-dev-environment`)
 
-- [ ] 12.1 Write `docker/Dockerfile` for the API (dev-mode: uvicorn with reload)
+- [x] 12.1 Write `docker/Dockerfile` for the API (dev-mode: uvicorn with reload)
 - [ ] 12.2 Write `docker/docker-compose.yml` wiring the API, LocalStack (S3 only), and Postgres+pgvector containers together with the env vars from `Settings`
 - [ ] 12.3 Complete `Makefile`: `make dev` brings up the full stack per docker-compose, `make down` tears it down, `make migrate` runs Alembic migrations against the local DB, `make test` runs the automated test suite
 - [ ] 12.4 Manually verify `make dev` then `curl http://localhost:8000/health` returns a healthy response, and that storage operations succeed against LocalStack without reaching real AWS
