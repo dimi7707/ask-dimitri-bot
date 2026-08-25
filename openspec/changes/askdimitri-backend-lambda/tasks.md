@@ -78,7 +78,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 ## 11. Chat API Endpoint (spec: `rag-chat-api`)
 
-- [ ] 11.1 Write tests for the similarity-threshold guard: above-threshold best score forwards context to generation, below-threshold best score short-circuits to a no-information response without calling the generation provider
+- [x] 11.1 Write tests for the similarity-threshold guard: above-threshold best score forwards context to generation, below-threshold best score short-circuits to a no-information response without calling the generation provider
 - [ ] 11.2 Write tests for off-topic question handling declining without invoking the vector-store provider
 - [ ] 11.3 Write tests for response language matching the question's language (ES and EN cases)
 - [ ] 11.4 Write tests for prompt-injection resilience: embedded instructions in the question and in a retrieved chunk are not followed
