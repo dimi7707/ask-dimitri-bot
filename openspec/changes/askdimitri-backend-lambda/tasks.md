@@ -71,7 +71,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 ## 10. Retrieval & Generation Services
 
-- [ ] 10.1 Write tests for `app/services/retrieval.py` covering: embeds the question, calls vector-store similarity search, returns chunks plus the best score
+- [x] 10.1 Write tests for `app/services/retrieval.py` covering: embeds the question, calls vector-store similarity search, returns chunks plus the best score
 - [ ] 10.2 Implement `app/services/retrieval.py` to pass those tests
 - [ ] 10.3 Write tests for `app/services/generation.py` covering: builds the system prompt with retrieved context, calls the generation provider, returns the answer text
 - [ ] 10.4 Implement `app/services/generation.py` and `app/core/prompts.py` (system prompt template covering off-topic rejection, bilingual instruction, prompt-injection resilience) to pass those tests
