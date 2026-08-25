@@ -312,3 +312,44 @@ def test_debug_context_is_omitted_for_off_topic_questions_since_nothing_was_retr
     body = client.post("/chat", json={"question": "¿Cuál es la capital de Francia?"}).json()
 
     assert "debug_context" not in body
+
+
+# --- 11.6 request/response contract --------------------------------------------------------
+
+
+def test_valid_question_returns_200_with_a_non_empty_answer():
+    client, _, _, _ = build_client(chunks=[chunk("Python y AWS", 0.82)])
+
+    response = client.post("/chat", json={"question": SPANISH_QUESTION})
+
+    assert response.status_code == 200
+    assert isinstance(response.json()["answer"], str)
+    assert response.json()["answer"]
+
+
+def test_missing_question_field_returns_422_without_calling_any_provider():
+    client, embedder, vector_store, generator = build_client(chunks=[chunk("Python y AWS", 0.82)])
+
+    response = client.post("/chat", json={})
+
+    assert response.status_code == 422
+    assert embedder.embedded_texts == []
+    assert vector_store.searches == []
+    assert generator.calls == []
+
+
+def test_blank_question_returns_422_without_calling_any_provider():
+    client, embedder, vector_store, generator = build_client(chunks=[chunk("Python y AWS", 0.82)])
+
+    response = client.post("/chat", json={"question": "   "})
+
+    assert response.status_code == 422
+    assert embedder.embedded_texts == []
+    assert vector_store.searches == []
+    assert generator.calls == []
+
+
+def test_non_string_question_returns_422():
+    client, _, _, _ = build_client()
+
+    assert client.post("/chat", json={"question": 42}).status_code == 422
