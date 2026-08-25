@@ -8,6 +8,8 @@ def test_settings_defaults_match_spec_values():
     assert settings.embedding_model_id == "amazon.titan-embed-text-v2:0"
     assert settings.similarity_threshold == 0.6
     assert settings.include_debug_context is False
+    assert settings.chunk_size == 512
+    assert settings.chunk_overlap == 50
 
 
 def test_settings_defaults_select_current_providers():

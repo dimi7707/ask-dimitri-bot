@@ -23,6 +23,14 @@ def test_get_document_processor_dispatches_to_the_configured_provider(monkeypatc
     assert isinstance(processor, FakeDocumentProcessor)
 
 
+def test_get_document_processor_defaults_to_llamaindex():
+    from app.integrations.document_processing.llamaindex_provider import LlamaIndexDocumentProcessor
+
+    processor = document_processing_factory.get_document_processor(settings=Settings(_env_file=None))
+
+    assert isinstance(processor, LlamaIndexDocumentProcessor)
+
+
 def test_get_document_processor_raises_on_unregistered_provider():
     settings = Settings(_env_file=None, document_processor="does-not-exist")
 

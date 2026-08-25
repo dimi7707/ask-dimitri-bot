@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     similarity_top_k: int = 5
     include_debug_context: bool = False
 
+    # Document chunking (tokens), applied at ingestion time.
+    chunk_size: int = 512
+    chunk_overlap: int = 50
+
     # Provider selectors resolved by app/integrations/*/factory.py.
     storage_provider: str = "s3"
     embedding_provider: str = "bedrock"

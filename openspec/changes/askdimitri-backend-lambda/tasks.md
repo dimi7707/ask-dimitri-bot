@@ -61,7 +61,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 - [x] 8.1 Write tests for `llamaindex_provider.load_and_chunk` covering `.pdf`, `.docx`, `.pptx` inputs and rejection of unsupported extensions
 - [x] 8.2 Implement `app/integrations/document_processing/llamaindex_provider.py` to pass those tests
-- [ ] 8.3 Wire `DOCUMENT_PROCESSOR=llamaindex` as the default in the factory
+- [x] 8.3 Wire `DOCUMENT_PROCESSOR=llamaindex` as the default in the factory
 
 ## 9. Document Ingestion (spec: `document-ingestion`)
 
