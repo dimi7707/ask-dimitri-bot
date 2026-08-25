@@ -65,7 +65,7 @@ Conventions for implementation (see design.md and the project's implementation-q
 
 ## 9. Document Ingestion (spec: `document-ingestion`)
 
-- [ ] 9.1 Write tests for the ingestion flow (using fakes for storage/processing/embedding/vector-store providers) covering: successful ingest creates `documents` + `document_chunks`, unsupported file type fails cleanly, re-ingesting a `document_id` deletes prior chunks before inserting new ones, ingesting one document leaves other documents' chunks untouched
+- [x] 9.1 Write tests for the ingestion flow (using fakes for storage/processing/embedding/vector-store providers) covering: successful ingest creates `documents` + `document_chunks`, unsupported file type fails cleanly, re-ingesting a `document_id` deletes prior chunks before inserting new ones, ingesting one document leaves other documents' chunks untouched
 - [ ] 9.2 Implement `ingestion/ingest.py` orchestrating the four providers to pass those tests
 - [ ] 9.3 Wire `make ingest` to run the script against the local stack
 
