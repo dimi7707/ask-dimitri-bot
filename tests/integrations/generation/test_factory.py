@@ -23,6 +23,14 @@ def test_get_generation_provider_dispatches_to_the_configured_provider(monkeypat
     assert isinstance(provider, FakeGenerationProvider)
 
 
+def test_get_generation_provider_defaults_to_bedrock():
+    from app.integrations.generation.bedrock_provider import BedrockGenerationProvider
+
+    provider = generation_factory.get_generation_provider(settings=Settings(_env_file=None))
+
+    assert isinstance(provider, BedrockGenerationProvider)
+
+
 def test_get_generation_provider_raises_on_unregistered_provider():
     settings = Settings(_env_file=None, llm_provider="does-not-exist")
 

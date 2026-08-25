@@ -23,6 +23,14 @@ def test_get_embedding_provider_dispatches_to_the_configured_provider(monkeypatc
     assert isinstance(provider, FakeEmbeddingProvider)
 
 
+def test_get_embedding_provider_defaults_to_bedrock():
+    from app.integrations.embeddings.bedrock_provider import BedrockEmbeddingProvider
+
+    provider = embeddings_factory.get_embedding_provider(settings=Settings(_env_file=None))
+
+    assert isinstance(provider, BedrockEmbeddingProvider)
+
+
 def test_get_embedding_provider_raises_on_unregistered_provider():
     settings = Settings(_env_file=None, embedding_provider="does-not-exist")
 
