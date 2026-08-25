@@ -84,8 +84,8 @@ Conventions for implementation (see design.md and the project's implementation-q
 - [x] 11.4 Write tests for prompt-injection resilience: embedded instructions in the question and in a retrieved chunk are not followed
 - [x] 11.5 Write tests for the `debug_context` field: present with scores when `INCLUDE_DEBUG_CONTEXT=true`, absent when `false`/unset
 - [x] 11.6 Write tests for the request/response contract: valid question returns 200 with `answer`; missing `question` returns 422 with no provider calls made
-- [ ] 11.7 Implement `app/models/schemas.py` (Pydantic request/response models) and `app/api/routes/chat.py` orchestrating retrieval + threshold guard + generation to pass all of the above
-- [ ] 11.8 Wire the chat route into `app/main.py`
+- [x] 11.7 Implement `app/models/schemas.py` (Pydantic request/response models) and `app/api/routes/chat.py` orchestrating retrieval + threshold guard + generation to pass all of the above
+- [x] 11.8 Wire the chat route into `app/main.py`
 
 ## 12. Local Dev Environment (spec: `local-dev-environment`)
 
