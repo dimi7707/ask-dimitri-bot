@@ -195,6 +195,9 @@ Bedrock is never called from an automated test: the embedding and generation pro
 with the client mocked at the boundary, so the suite stays free and deterministic. Real Bedrock is
 exercised manually through the Postman collection.
 
+> **The first run is slow.** The LlamaIndex tests download tokenizer data (tiktoken/NLTK) on first
+> use — expect a couple of minutes once, then ~3 seconds on every later run.
+
 ---
 
 ## Postman

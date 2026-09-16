@@ -94,6 +94,38 @@ def test_generate_without_context_states_that_no_context_was_retrieved():
     assert "¿Qué stack maneja?" in human_message
 
 
+def test_the_bedrock_client_is_not_built_until_the_first_generate_call(monkeypatch):
+    """Constructing ChatBedrock resolves AWS credentials, which blocks for ~90s on a machine
+    without them — so the factory must be able to build this provider without paying that cost
+    (it also keeps the Lambda cold start cheap for requests that never reach generation)."""
+    from app.integrations.generation import bedrock_provider
+
+    def fail_if_constructed(**kwargs):
+        raise AssertionError("ChatBedrock must not be constructed eagerly")
+
+    monkeypatch.setattr(bedrock_provider, "ChatBedrock", fail_if_constructed)
+
+    BedrockGenerationProvider(model_id="m", region="us-east-1")
+
+
+def test_the_bedrock_client_is_built_once_and_reused(monkeypatch):
+    from app.integrations.generation import bedrock_provider
+
+    builds = []
+
+    def build_chat_model(**kwargs):
+        builds.append(kwargs)
+        return FakeChatModel()
+
+    monkeypatch.setattr(bedrock_provider, "ChatBedrock", build_chat_model)
+    provider = BedrockGenerationProvider(model_id="amazon.nova-micro-v1:0", region="us-east-1")
+
+    provider.generate(system_prompt=SYSTEM_PROMPT, question="una", context=[])
+    provider.generate(system_prompt=SYSTEM_PROMPT, question="otra", context=[])
+
+    assert builds == [{"model": "amazon.nova-micro-v1:0", "region": "us-east-1"}]
+
+
 def test_generate_propagates_errors_from_bedrock():
     provider = BedrockGenerationProvider(model_id="m", region="us-east-1", chat_model=FailingChatModel())
 
