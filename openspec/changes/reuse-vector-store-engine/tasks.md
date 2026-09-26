@@ -24,7 +24,7 @@
 
 ## 5. Verify nothing else regressed
 
-- [ ] 5.1 Confirm the `/chat` tests that inject fakes via `app.dependency_overrides` still work — the cache must not shadow registered overrides
-- [ ] 5.2 Confirm `ingestion/ingest.py` needs no change: it already builds its providers once in `main()` and passes them down
-- [ ] 5.3 Run the full suite and confirm it is green at the baseline count plus the new tests
-- [ ] 5.4 Update the `adb-001` ticket's acceptance criteria checkboxes and close it
+- [x] 5.1 Confirm the `/chat` tests that inject fakes via `app.dependency_overrides` still work — the cache must not shadow registered overrides
+- [x] 5.2 Confirm `ingestion/ingest.py` needs no change: it already builds its providers once in `main()` and passes them down
+- [x] 5.3 Run the full suite and confirm it is green at the baseline count plus the new tests (**123 passed** = 116 baseline + 7 new)
+- [x] 5.4 Update the `adb-001` ticket's acceptance criteria checkboxes and close it
