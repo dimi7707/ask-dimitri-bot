@@ -17,5 +17,10 @@ PROVIDERS: dict[str, Callable[[], VectorStoreProvider]] = {
 
 
 def get_vector_store_provider(settings: Settings | None = None) -> VectorStoreProvider:
+    """Deliberately uncached: `Settings` is a Pydantic model and therefore unhashable, so
+    `@lru_cache` here would raise `TypeError` for every caller that passes settings explicitly.
+    Provider reuse is the responsibility of `app.api.deps.get_vector_store`, which takes no
+    arguments.
+    """
     settings = settings or get_settings()
     return resolve_provider("vector store", settings.vector_store_provider, PROVIDERS)

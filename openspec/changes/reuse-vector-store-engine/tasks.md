@@ -5,9 +5,9 @@
 
 ## 2. Cache the provider at the dependency layer
 
-- [ ] 2.1 Add `from functools import lru_cache` and decorate `get_vector_store` with `@lru_cache` in `app/api/deps.py`
-- [ ] 2.2 Leave `app/integrations/vector_store/factory.py` uncached, and note in a comment why (`Settings` is unhashable, so `lru_cache` there raises `TypeError`)
-- [ ] 2.3 Confirm `tests/integrations/vector_store/test_factory.py` still passes unmodified, especially the cases passing an explicit `Settings`
+- [x] 2.1 Add `from functools import lru_cache` and decorate `get_vector_store` with `@lru_cache` in `app/api/deps.py`
+- [x] 2.2 Leave `app/integrations/vector_store/factory.py` uncached, and note in a comment why (`Settings` is unhashable, so `lru_cache` there raises `TypeError`)
+- [x] 2.3 Confirm `tests/integrations/vector_store/test_factory.py` still passes unmodified, especially the cases passing an explicit `Settings`
 
 ## 3. Configure the engine for the Lambda runtime
 
