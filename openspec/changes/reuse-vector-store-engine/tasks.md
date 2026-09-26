@@ -1,7 +1,7 @@
 ## 1. Baseline
 
-- [ ] 1.1 Run the full suite and record the passing count as the baseline to compare against (expected: 108 passed)
-- [ ] 1.2 Reproduce the defect from the ticket: confirm that two calls to `get_vector_store_provider()` return different instances and different `_engine` objects
+- [x] 1.1 Run the full suite and record the passing count as the baseline to compare against (measured: **116 passed**; the ticket's "108" was stale)
+- [x] 1.2 Reproduce the defect from the ticket: confirm that two calls to `get_vector_store_provider()` return different instances and different `_engine` objects
 
 ## 2. Cache the provider at the dependency layer
 
