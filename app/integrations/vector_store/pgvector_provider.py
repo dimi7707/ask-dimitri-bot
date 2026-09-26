@@ -10,7 +10,15 @@ from app.models.documents import Document, DocumentChunk
 
 class PgVectorStoreProvider:
     def __init__(self, database_url: str):
-        self._engine = create_engine(database_url)
+        self._engine = create_engine(
+            database_url,
+            # A Lambda container freezes between invocations and Aurora may close the connection on
+            # its own, so ping before handing a pooled connection to the caller.
+            pool_pre_ping=True,
+            # One container serves one request at a time; the overflow is headroom, not concurrency.
+            pool_size=1,
+            max_overflow=2,
+        )
 
     @contextmanager
     def _session(self):

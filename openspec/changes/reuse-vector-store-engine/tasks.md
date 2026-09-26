@@ -11,8 +11,8 @@
 
 ## 3. Configure the engine for the Lambda runtime
 
-- [ ] 3.1 Pass `pool_pre_ping=True`, `pool_size=1`, and `max_overflow=2` to `create_engine` in `PgVectorStoreProvider.__init__`
-- [ ] 3.2 Verify `tests/integrations/vector_store/test_pgvector_provider.py` still passes with the new pool arguments
+- [x] 3.1 Pass `pool_pre_ping=True`, `pool_size=1`, and `max_overflow=2` to `create_engine` in `PgVectorStoreProvider.__init__`
+- [x] 3.2 Verify `tests/integrations/vector_store/test_pgvector_provider.py` still passes with the new pool arguments
 
 ## 4. Tests proving reuse
 
