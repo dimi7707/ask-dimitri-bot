@@ -16,10 +16,11 @@
 
 ## 4. Tests proving reuse
 
-- [ ] 4.1 Add a test asserting `get_vector_store()` returns the identical instance on two consecutive calls (`a is b`)
-- [ ] 4.2 Add a test asserting two consecutive `POST /chat` requests are served by the same `provider._engine` object
-- [ ] 4.3 Add a test asserting the pgvector provider's engine is created with `pool_pre_ping=True` (and the configured pool sizing)
-- [ ] 4.4 Add a fixture that calls `get_vector_store.cache_clear()` wherever a test needs a fresh provider, so the cache does not leak state between tests
+- [x] 4.1 Add a test asserting `get_vector_store()` returns the identical instance on two consecutive calls (`a is b`)
+- [x] 4.2 Add a test asserting two consecutive `POST /chat` requests are served by the same `provider._engine` object
+- [x] 4.3 Add a test asserting the pgvector provider's engine is created with `pool_pre_ping=True` (and the configured pool sizing)
+- [x] 4.4 Add a fixture that calls `get_vector_store.cache_clear()` wherever a test needs a fresh provider, so the cache does not leak state between tests
+- [x] 4.5 Confirm each new test actually fails against the unfixed code, so it guards the regression rather than passing vacuously
 
 ## 5. Verify nothing else regressed
 
