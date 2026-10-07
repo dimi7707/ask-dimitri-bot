@@ -10,6 +10,9 @@ def test_settings_defaults_match_spec_values():
     assert settings.include_debug_context is False
     assert settings.chunk_size == 512
     assert settings.chunk_overlap == 50
+    # Lambda serves one request per container at a time; the overflow is headroom, not concurrency.
+    assert settings.db_pool_size == 1
+    assert settings.db_max_overflow == 2
 
 
 def test_settings_defaults_select_current_providers():
@@ -26,9 +29,13 @@ def test_settings_honors_environment_variable_overrides(monkeypatch):
     monkeypatch.setenv("SIMILARITY_THRESHOLD", "0.75")
     monkeypatch.setenv("INCLUDE_DEBUG_CONTEXT", "true")
     monkeypatch.setenv("BEDROCK_MODEL_ID", "anthropic.claude-haiku-v1")
+    monkeypatch.setenv("DB_POOL_SIZE", "5")
+    monkeypatch.setenv("DB_MAX_OVERFLOW", "10")
 
     settings = Settings(_env_file=None)
 
     assert settings.similarity_threshold == 0.75
     assert settings.include_debug_context is True
     assert settings.bedrock_model_id == "anthropic.claude-haiku-v1"
+    assert settings.db_pool_size == 5
+    assert settings.db_max_overflow == 10

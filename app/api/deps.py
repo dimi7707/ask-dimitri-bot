@@ -33,9 +33,23 @@ def get_vector_store() -> VectorStoreProvider:
 
     On Lambda the cache spans invocations of a warm execution environment, which is the point: an
     engine per request pays a full TCP+TLS handshake per question and exhausts Aurora's
-    `max_connections`. Tests that need a fresh provider call `get_vector_store.cache_clear()`.
+    `max_connections`. Call `reset_vector_store()` — not `cache_clear()` — to drop the provider.
     """
     return get_vector_store_provider()
+
+
+def reset_vector_store() -> None:
+    """Dispose the cached provider's engine, then drop it from the cache.
+
+    Clearing the cache alone would leave the pool holding its connections open until the garbage
+    collector finalizes the engine — the very leak the cache exists to prevent. Disposing first
+    makes a reset release the connections immediately.
+    """
+    if get_vector_store.cache_info().currsize:
+        engine = getattr(get_vector_store(), "_engine", None)
+        if engine is not None:
+            engine.dispose()
+    get_vector_store.cache_clear()
 
 
 def get_generator() -> GenerationProvider:

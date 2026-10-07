@@ -231,6 +231,7 @@ environment variable. See `.env.example` for a ready-to-copy local set.
 | `VECTOR_STORE_PROVIDER` | `pgvector` | Selects the vector-store implementation |
 | `DOCUMENT_PROCESSOR` | `llamaindex` | Selects the document-processing implementation |
 | `DATABASE_URL` | local Postgres DSN | Vector store connection |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `1` / `2` | Connection-pool sizing. The defaults suit Lambda, which serves one request per container; raise them for a runtime that handles concurrency in-process (uvicorn, provisioned concurrency) |
 | `AWS_REGION` | `us-east-1` | Region for Bedrock and S3 |
 | `S3_BUCKET_NAME` | `askdimitri-documents` | Source-document bucket |
 | `S3_ENDPOINT_URL` | unset | Set to the LocalStack endpoint locally; leave unset for real AWS |

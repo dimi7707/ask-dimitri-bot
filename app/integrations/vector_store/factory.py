@@ -8,7 +8,12 @@ from app.integrations.vector_store.base import VectorStoreProvider
 def _build_pgvector_provider() -> VectorStoreProvider:
     from app.integrations.vector_store.pgvector_provider import PgVectorStoreProvider
 
-    return PgVectorStoreProvider(database_url=get_settings().database_url)
+    settings = get_settings()
+    return PgVectorStoreProvider(
+        database_url=settings.database_url,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+    )
 
 
 PROVIDERS: dict[str, Callable[[], VectorStoreProvider]] = {

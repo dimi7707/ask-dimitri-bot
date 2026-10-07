@@ -9,15 +9,21 @@ from app.models.documents import Document, DocumentChunk
 
 
 class PgVectorStoreProvider:
-    def __init__(self, database_url: str):
+    def __init__(self, database_url: str, pool_size: int = 1, max_overflow: int = 2):
+        """Pool sizing is caller-supplied because it describes the runtime, not the store.
+
+        The defaults describe Lambda — one request per container at a time, the overflow being
+        headroom rather than concurrency. A runtime that serves requests concurrently in one process
+        passes larger values (see `DB_POOL_SIZE` / `DB_MAX_OVERFLOW`), otherwise requests queue
+        behind `pool_timeout` instead of running.
+        """
         self._engine = create_engine(
             database_url,
             # A Lambda container freezes between invocations and Aurora may close the connection on
             # its own, so ping before handing a pooled connection to the caller.
             pool_pre_ping=True,
-            # One container serves one request at a time; the overflow is headroom, not concurrency.
-            pool_size=1,
-            max_overflow=2,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
         )
 
     @contextmanager

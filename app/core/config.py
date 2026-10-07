@@ -26,8 +26,12 @@ class Settings(BaseSettings):
     vector_store_provider: str = "pgvector"
     document_processor: str = "llamaindex"
 
-    # Vector store.
+    # Vector store. The pool defaults match Lambda, which serves one request per container at a
+    # time; a runtime that handles concurrency in-process (uvicorn, provisioned concurrency) should
+    # raise them via env vars rather than queueing requests behind a single connection.
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/askdimitri"
+    db_pool_size: int = 1
+    db_max_overflow: int = 2
 
     # Object storage (S3 in prod, LocalStack locally via s3_endpoint_url).
     aws_region: str = "us-east-1"
