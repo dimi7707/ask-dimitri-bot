@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,8 +31,11 @@ class Settings(BaseSettings):
     # time; a runtime that handles concurrency in-process (uvicorn, provisioned concurrency) should
     # raise them via env vars rather than queueing requests behind a single connection.
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/askdimitri"
-    db_pool_size: int = 1
-    db_max_overflow: int = 2
+    # Bounded because SQLAlchemy reads the low end as "no limit": a `pool_size` of 0 and a
+    # `max_overflow` of -1 both mean *unbounded* connections, which is the inverse of the intent
+    # here and is one `.env` typo away.
+    db_pool_size: int = Field(default=1, ge=1)
+    db_max_overflow: int = Field(default=2, ge=0)
 
     # Object storage (S3 in prod, LocalStack locally via s3_endpoint_url).
     aws_region: str = "us-east-1"

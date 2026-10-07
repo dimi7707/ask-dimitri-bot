@@ -45,11 +45,16 @@ def reset_vector_store() -> None:
     collector finalizes the engine — the very leak the cache exists to prevent. Disposing first
     makes a reset release the connections immediately.
     """
-    if get_vector_store.cache_info().currsize:
-        engine = getattr(get_vector_store(), "_engine", None)
-        if engine is not None:
-            engine.dispose()
-    get_vector_store.cache_clear()
+    try:
+        # Guard on the cache being populated, so a reset never *builds* a provider just to drop it.
+        if get_vector_store.cache_info().currsize:
+            engine = getattr(get_vector_store(), "_engine", None)
+            if engine is not None:
+                engine.dispose()
+    finally:
+        # Clear even if disposing blew up: this is the only isolation the API tests have, so a
+        # failed dispose must not leave the stale provider behind for everything that runs next.
+        get_vector_store.cache_clear()
 
 
 def get_generator() -> GenerationProvider:

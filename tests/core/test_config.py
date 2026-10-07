@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from app.core.config import Settings
 
 
@@ -39,3 +42,15 @@ def test_settings_honors_environment_variable_overrides(monkeypatch):
     assert settings.bedrock_model_id == "anthropic.claude-haiku-v1"
     assert settings.db_pool_size == 5
     assert settings.db_max_overflow == 10
+
+
+@pytest.mark.parametrize(
+    ("variable", "value"),
+    [("DB_POOL_SIZE", "0"), ("DB_MAX_OVERFLOW", "-1")],
+)
+def test_settings_rejects_pool_values_sqlalchemy_reads_as_unbounded(monkeypatch, variable, value):
+    """SQLAlchemy treats pool_size=0 and max_overflow=-1 as *no limit* — the inverse of the intent."""
+    monkeypatch.setenv(variable, value)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)

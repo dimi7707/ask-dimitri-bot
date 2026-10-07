@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 
 from app.api import deps
-from app.core.config import Settings
+from app.core.config import Settings, get_settings
 from app.integrations.vector_store import factory as vector_store_factory
 from app.integrations.vector_store import pgvector_provider
 from app.integrations.vector_store.base import RetrievedChunk, VectorStoreProvider
@@ -176,6 +176,26 @@ def test_pgvector_engine_pool_sizing_is_caller_supplied(monkeypatch):
     assert captured["max_overflow"] == 10
 
 
+@pytest.fixture
+def fresh_settings():
+    """`get_settings` is `lru_cache`d, so an env-var test has to drop the memoized Settings."""
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def test_pool_sizing_flows_from_the_environment_to_the_engine(monkeypatch, fresh_settings):
+    """The end-to-end path the spec scenario describes: env var -> Settings -> factory -> engine."""
+    captured = capture_engine_kwargs(monkeypatch)
+    monkeypatch.setenv("DB_POOL_SIZE", "4")
+    monkeypatch.setenv("DB_MAX_OVERFLOW", "6")
+
+    vector_store_factory.get_vector_store_provider()
+
+    assert captured["pool_size"] == 4
+    assert captured["max_overflow"] == 6
+
+
 def test_factory_sizes_the_pool_from_settings(monkeypatch):
     captured = capture_engine_kwargs(monkeypatch)
     monkeypatch.setattr(
@@ -205,10 +225,34 @@ def test_reset_vector_store_disposes_the_engine_before_dropping_the_provider(mon
     assert deps.get_vector_store() is not provider
 
 
-def test_reset_vector_store_is_safe_when_nothing_is_cached():
+def test_reset_vector_store_builds_nothing_when_nothing_is_cached(monkeypatch):
+    """Resetting an empty cache must not resolve a provider — on a cold Lambda that would connect."""
+
+    def must_not_be_called():
+        raise AssertionError("reset constructed a provider instead of short-circuiting")
+
+    monkeypatch.setattr(deps, "get_vector_store_provider", must_not_be_called)
+
     deps.reset_vector_store()  # the fixture already reset it; a second reset must not raise
 
     assert deps.get_vector_store.cache_info().currsize == 0
+
+
+def test_reset_vector_store_clears_the_cache_even_if_dispose_fails(monkeypatch):
+    """A failed dispose must not leave the stale provider behind for everything that runs next."""
+    monkeypatch.setattr(deps, "get_vector_store_provider", EngineHoldingVectorStore)
+    provider = deps.get_vector_store()
+
+    def failing_dispose():
+        raise RuntimeError("socket refused to close")
+
+    monkeypatch.setattr(provider._engine, "dispose", failing_dispose)
+
+    with pytest.raises(RuntimeError):
+        deps.reset_vector_store()
+
+    assert deps.get_vector_store.cache_info().currsize == 0
+    assert deps.get_vector_store() is not provider
 
 
 # --- 5.1 the cache must not shadow test overrides ------------------------------------------
