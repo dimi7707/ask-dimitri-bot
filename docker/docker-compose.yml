@@ -55,6 +55,11 @@ services:
       INCLUDE_DEBUG_CONTEXT: ${INCLUDE_DEBUG_CONTEXT:-true}
       CHUNK_SIZE: ${CHUNK_SIZE:-512}
       CHUNK_OVERLAP: ${CHUNK_OVERLAP:-50}
+      # Larger than the Lambda defaults (1/2) on purpose: here the app runs under uvicorn, which
+      # dispatches the sync /chat route to a threadpool, so concurrent requests would otherwise
+      # queue behind pool_timeout waiting for the single connection.
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
       # Bedrock has no local emulation, so these must be real credentials for /chat to answer.
       # Everything else (health, storage, vector store) works without them.
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
