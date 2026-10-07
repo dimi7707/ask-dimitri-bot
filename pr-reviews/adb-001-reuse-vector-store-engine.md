@@ -4,9 +4,9 @@
 **Files reviewed:** 10 (3 source, 1 test, 6 spec/docs) — +563 / −1
 **Test suite at review time:** ✅ 115 passed, 8 skipped
 
-> **Status: all six findings addressed on this branch.** The suite is now at 120 passed, 8 skipped,
-> and the 12 lifecycle guards were re-verified against the unfixed code (7 fail with `@lru_cache`
-> removed). What changed per finding is recorded at the bottom of this file.
+> **Status: all six findings addressed on this branch, plus a second review round.** The suite is now
+> at 124 passed, 8 skipped, and every guard was re-verified against the unfixed code. What changed
+> per finding is recorded at the bottom of this file.
 
 ---
 
@@ -304,3 +304,21 @@ Also folded in: the pool-sizing and cache-reset behaviours were added to
 `openspec/specs/provider-lifecycle/spec.md` as requirements, so the spec still describes what the
 code does. The pre-existing `DetachedInstanceError` risk in `similarity_search` was left alone — it
 predates this PR and is out of its scope.
+
+### Second review round
+
+The fixes above were themselves reviewed. Six more findings, five fixed:
+
+| Finding | What changed |
+|---|---|
+| 🟠 `reset_vector_store()` skipped `cache_clear()` if `dispose()` raised, leaving the stale provider as every later API test's starting state | The clear moved into a `finally`. New test asserts the cache empties even when disposal raises. |
+| 🟠 The `currsize` guard — what stops a reset from *building* a provider — was untested; its test asserted a post-condition `cache_clear()` satisfies unconditionally | Rewritten to assert no provider is constructed. Measured why it mattered: with the guard removed the suite stayed fully green while the conftest fixture silently built **70 real `PgVectorStoreProvider` instances**. |
+| 🟡 `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` not passed through `docker-compose.yml` — the one runtime the change itself documents as hazardous | Added, defaulting to 5/10 rather than the Lambda 1/2, since uvicorn dispatches the sync `/chat` route to a threadpool. |
+| 🟡 `proposal.md` still listed `factory.py` under "Unchanged by design", and the archived delta spec had diverged from the live one | Both brought in line. Half-corrected archive is worse than either a frozen or a maintained one. |
+| ⚪ No bounds on the pool settings: `DB_POOL_SIZE=0` and `DB_MAX_OVERFLOW=-1` both mean *unbounded* in SQLAlchemy — the inverse of the intent, one typo away | `Field(ge=1)` / `Field(ge=0)`, with a parametrized test. |
+| ⚪ The spec scenario describes env → engine, but coverage was split across two disconnected halves | Added the end-to-end test. |
+
+Deferred: `reset_vector_store()` locates the engine via `getattr(provider, "_engine", None)`, so a
+second vector-store implementation holding its resource under another name would silently
+reintroduce the leak. A `close()` on the `VectorStoreProvider` protocol is the honest fix, and
+`adb-002` — where sibling providers arrive — is where it belongs.

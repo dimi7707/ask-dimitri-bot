@@ -40,6 +40,10 @@ abandoned engine.
 - **WHEN** the cache is reset while holding no provider
 - **THEN** the reset succeeds without constructing a provider and without raising
 
+#### Scenario: A failed disposal still drops the provider
+- **WHEN** disposing the engine raises
+- **THEN** the cache is cleared regardless, so the stale provider is not handed to the next caller
+
 ### Requirement: Provider factories accept explicit settings and remain uncached
 The vector store factory SHALL continue to accept an optional `Settings` argument and SHALL NOT be
 memoized, because `Settings` is a Pydantic model and is not hashable. Caching SHALL be applied only
@@ -74,6 +78,10 @@ concurrency in-process can size the pool up instead of queueing requests behind 
 - **WHEN** `DB_POOL_SIZE` and `DB_MAX_OVERFLOW` are set in the environment
 - **THEN** the provider built by the factory creates its engine with those values instead of the
   defaults, without any code change
+
+#### Scenario: Pool sizing rejects values SQLAlchemy reads as unbounded
+- **WHEN** `DB_POOL_SIZE` is 0 or `DB_MAX_OVERFLOW` is negative
+- **THEN** settings validation fails, rather than silently configuring an unbounded pool
 
 #### Scenario: A stale connection after idle time does not fail the request
 - **WHEN** the first `POST /chat` request arrives after an idle period long enough for the database

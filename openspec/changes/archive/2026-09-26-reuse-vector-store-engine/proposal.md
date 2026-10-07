@@ -40,14 +40,17 @@ No breaking changes: the public HTTP contract, the factory signature, and
 
 ## Impact
 
-- **Code**: `app/api/deps.py` (add `@lru_cache` to `get_vector_store`),
-  `app/integrations/vector_store/pgvector_provider.py` (`create_engine` pool arguments).
-- **Unchanged by design**: `app/integrations/vector_store/factory.py` (must stay uncached because of
-  the unhashable `Settings` argument) and `ingestion/ingest.py`, which already builds its providers
-  once in `main()` and passes them down.
+- **Code**: `app/api/deps.py` (add `@lru_cache` to `get_vector_store`, plus `reset_vector_store()`
+  disposing the engine before dropping it), `app/integrations/vector_store/pgvector_provider.py`
+  (`create_engine` pool arguments), `app/core/config.py` and
+  `app/integrations/vector_store/factory.py` (pool sizing read from `Settings` and threaded into
+  the provider).
+- **Unchanged by design**: the factory stays *uncached* — it must, because of the unhashable
+  `Settings` argument — and `ingestion/ingest.py` needs no change, since it already builds its
+  providers once in `main()` and passes them down.
 - **Tests**: new tests for provider and engine reuse; existing
   `tests/integrations/vector_store/test_factory.py` must keep passing without modification, and the
-  full suite must stay green (currently 108 passing).
+  full suite must stay green (baseline: 108 passing, 8 skipped).
 - **Infrastructure**: reduces open connections against Aurora Serverless v2 and removes per-request
   connection handshake latency; unblocks Lambda deployment.
 - **Follow-up, out of scope**: Secrets Manager integration for the database password (M4) and
