@@ -70,35 +70,57 @@ move provider access away from the `Depends` pattern the routes and tests alread
 keeps the existing shape and defers construction to first use.
 
 **Scope the cache to the vector store dependency only.**
-`get_embedder` and `get_generator` are out of scope for this change; the Bedrock chat client is
-already built lazily (commit `eb18bb9`). Narrowing the change keeps the blast radius to the resource
-that actually holds connections. `adb-002` covers the sibling resource under the same root cause.
+`get_embedder` and `get_generator` are out of scope for this change. Narrowing it keeps the blast
+radius to the resource that actually holds connections: a Bedrock client is stateless HTTP, so
+rebuilding one wastes setup work but never exhausts a pool the way an abandoned engine does.
 
-**Configure the pool for one-request-per-container.**
+The deferral is a cost trade-off, not an absence of cost. `BedrockGenerationProvider` builds its
+chat model lazily (commit `eb18bb9`), but that laziness is *per provider instance*, and the instance
+itself is rebuilt per request — so `ChatBedrock` is still constructed on every `POST /chat`.
+`BedrockEmbeddingProvider` is worse: it creates its `boto3` client eagerly in `__init__`, so every
+request pays credential resolution and botocore model parsing. `adb-002` covers **both** siblings
+under the same root cause, and the fix there is the same one-line `@lru_cache`.
+
+**Configure the pool for one-request-per-container, but let the runtime override it.**
 
 ```python
 create_engine(
     database_url,
     pool_pre_ping=True,
-    pool_size=1,
-    max_overflow=2,
+    pool_size=settings.db_pool_size,      # default 1
+    max_overflow=settings.db_max_overflow,  # default 2
 )
 ```
 
 `pool_pre_ping` is the load-bearing setting: between invocations the Lambda container is *frozen*,
 and Aurora may close the connection on its own. Without a pre-use ping, the first request after an
-idle stretch fails on a dead connection. `pool_size=1` matches the execution model — one container
-serves one request at a time — and `max_overflow=2` leaves headroom rather than hard-failing on an
-unexpected concurrent checkout.
+idle stretch fails on a dead connection. A `pool_size` of 1 matches the execution model — one
+container serves one request at a time — and `max_overflow=2` leaves headroom rather than
+hard-failing on an unexpected concurrent checkout.
+
+The sizing is a `Settings` field rather than a literal because the same image also runs under
+`uvicorn` in `docker compose`, where `def chat` is a sync route dispatched to Starlette's threadpool
+and several requests can check out connections at once. At the defaults the fourth concurrent
+request would block for `pool_timeout` (30 s) and then raise `QueuePool limit of size 1 overflow 2
+reached`. Keeping it in `Settings` — where `similarity_threshold`, `chunk_size` and every other
+tunable already live — makes that a `.env` change instead of a code change, which is also what the
+"`pool_size=1` becomes wrong if the runtime changes" risk below asks for.
 
 *Alternative considered:* `NullPool`, which opens a connection per checkout and closes it after. It
 eliminates stale-connection risk but reinstates the per-request handshake cost this change exists to
 remove. A small pre-pinged pool gets the reuse and handles staleness.
 
-**Prove reuse by object identity, not by counting engines.**
-Tests assert `a is b` on the provider and on `provider._engine` across two requests. Identity is the
-property the design actually guarantees; instrumenting `create_engine` call counts would couple the
-tests to SQLAlchemy internals.
+**Prove reuse by object identity, observed from inside the request.**
+Tests assert `a is b` on the engine, because identity is the property the design actually
+guarantees. The identity is recorded *inside* `similarity_search` rather than read back from
+`deps.get_vector_store()`: reading it back from the module bypasses FastAPI's dependency resolution,
+so a future route that stopped using the cached dependency would leave the test green while the
+per-request engine came back.
+
+The pool settings are asserted by capturing the kwargs the provider passes to `create_engine`, not
+by reading `pool._pre_ping` and `pool._max_overflow`. Both of those are SQLAlchemy internals, where
+an upstream rename produces an `AttributeError` instead of a meaningful failure; the capture asserts
+the same contract against this project's own call site.
 
 ## Risks / Trade-offs
 
@@ -108,9 +130,11 @@ original is never consulted when an override is registered. This is the one real
 so it gets confirmed by a green suite rather than assumed — the spec carries it as an explicit
 scenario.
 
-**Cached provider leaks state between tests that exercise the real provider** → `lru_cache` exposes
-`cache_clear()`; any test needing a fresh engine calls it in a fixture. Worth noting because the
-cache now outlives a single test function.
+**Cached provider leaks state between tests that exercise the real provider** → an autouse fixture
+in `tests/api/conftest.py` resets it around every API test, on the way in as well as on the way out,
+so no test inherits the previous one's provider. The reset goes through `deps.reset_vector_store()`
+rather than `cache_clear()` directly: clearing alone drops the engine without disposing it, leaving
+the pool holding its connections until garbage collection — the very leak this change removes.
 
 **`pool_size=1` becomes wrong if the runtime changes** → Adding provisioned concurrency, or moving
 to a Lambda that handles concurrency in-process, invalidates the sizing assumption. Recorded here

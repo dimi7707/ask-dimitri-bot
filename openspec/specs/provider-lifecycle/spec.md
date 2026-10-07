@@ -18,14 +18,27 @@ the lifetime of the process (a warm Lambda execution environment included).
 
 #### Scenario: Two consecutive chat requests share one engine
 - **WHEN** a client sends two consecutive `POST /chat` requests handled by the same process
-- **THEN** both requests are served by the same provider instance and the same SQLAlchemy engine
-  object, and no additional engine is created for the second request
+- **THEN** the engine observed from inside the vector store call is the identical object on both
+  requests, and no additional engine is created for the second request
 
 #### Scenario: A warm invocation creates no new connection pool
 - **WHEN** a Lambda execution environment that has already served a `POST /chat` request receives
   another one
 - **THEN** the existing connection pool is reused and no new TCP/TLS handshake to Postgres is
   performed to obtain an already-pooled connection
+
+### Requirement: Dropping the cached provider releases its pool
+Discarding the cached vector store provider SHALL dispose its SQLAlchemy engine first, so the pooled
+connections are released at that moment rather than whenever the garbage collector finalizes the
+abandoned engine.
+
+#### Scenario: Reset disposes the engine before dropping the provider
+- **WHEN** the cached provider is reset
+- **THEN** its engine is disposed, and the next resolution builds a new provider
+
+#### Scenario: Reset with an empty cache is a no-op
+- **WHEN** the cache is reset while holding no provider
+- **THEN** the reset succeeds without constructing a provider and without raising
 
 ### Requirement: Provider factories accept explicit settings and remain uncached
 The vector store factory SHALL continue to accept an optional `Settings` argument and SHALL NOT be
@@ -45,16 +58,22 @@ at the API dependency layer, whose functions take no arguments.
 ### Requirement: Database engine is configured for a serverless runtime
 The system SHALL create the pgvector provider's SQLAlchemy engine with `pool_pre_ping` enabled, so
 that a connection closed by the database while the execution environment was frozen is discarded
-and replaced instead of being handed to the caller. The engine SHALL be configured with a pool sized
-for a runtime that serves one request per process at a time.
+and replaced instead of being handed to the caller. The pool size SHALL default to a runtime that
+serves one request per process at a time, and SHALL be configurable, so that a runtime handling
+concurrency in-process can size the pool up instead of queueing requests behind a single connection.
 
 #### Scenario: Engine enables pre-ping
 - **WHEN** the pgvector provider is constructed
 - **THEN** its engine is created with `pool_pre_ping=True`
 
-#### Scenario: Pool is sized for single-request-per-container concurrency
-- **WHEN** the pgvector provider is constructed
+#### Scenario: Pool defaults to single-request-per-container concurrency
+- **WHEN** the pgvector provider is constructed without explicit pool arguments
 - **THEN** its engine is created with `pool_size=1` and `max_overflow=2`
+
+#### Scenario: Pool sizing is configurable per runtime
+- **WHEN** `DB_POOL_SIZE` and `DB_MAX_OVERFLOW` are set in the environment
+- **THEN** the provider built by the factory creates its engine with those values instead of the
+  defaults, without any code change
 
 #### Scenario: A stale connection after idle time does not fail the request
 - **WHEN** the first `POST /chat` request arrives after an idle period long enough for the database
