@@ -112,16 +112,20 @@ exhausting a quota, but it is connection churn, not merely object churn.
 - **AC-8** — WHEN the standalone ingestion script runs, THEN it SHALL continue to
   build its own providers at its entry point, unaffected by the API dependency cache.
 - **AC-9** *(invariant)* — WHEN a provider constructs its Bedrock client, THEN the
-  client SHALL be configured with a connect timeout of **3 s**, a read timeout of
-  **8 s**, and at most **2 attempts**, so one unresponsive Bedrock call cannot consume
-  more than ~22 s of the Lambda's 30 s budget. This SHALL apply to the embedding
-  client and to the generation client alike.
-- **AC-10** *(invariant)* — WHEN the cached providers are released, THEN every cached
+  client SHALL be configured with a connect timeout, a read timeout, and a maximum
+  attempt count, defaulting to **3 s**, **8 s**, and **2 attempts** — so one
+  unresponsive Bedrock call cannot consume more than ~22 s of the Lambda's 30 s
+  budget. This SHALL apply to the embedding client and to the generation client alike.
+- **AC-10** — The timeout and attempt values SHALL be configurable per runtime without
+  a code change, and configuration SHALL reject values that remove the ceiling (a
+  non-positive timeout or an attempt count below 1), rather than silently accepting an
+  unbounded client.
+- **AC-11** *(invariant)* — WHEN the cached providers are released, THEN every cached
   provider that exposes a release operation SHALL have it invoked before its cache
-  entry is dropped, and the cache entry SHALL be dropped even if that operation
+  entry is dropped, and **every** cache entry SHALL be dropped even if a release
   raises, so a failed release never leaves a stale provider behind for the next
   caller.
-- **AC-11** — IF a release is requested while nothing is cached, THEN the system SHALL
+- **AC-12** — IF a release is requested while nothing is cached, THEN the system SHALL
   succeed without constructing a provider — on a cold Lambda, constructing one just to
   release it would resolve credentials for nothing.
 
@@ -148,7 +152,7 @@ them would make `isinstance` fail for every existing test double until each one 
 method that releases nothing — churn across `tests/api/fakes.py` and both
 `test_factory.py` files for no behavioral gain. A separate protocol removes the
 `getattr` sniffing (the actual defect adb-001 flagged) while leaving every current fake
-valid. Drives AC-10.
+valid. Drives AC-11.
 
 ### OQ-2 — What is the reset surface for the two new caches? — **Closed**
 
@@ -165,7 +169,7 @@ name keep passing unmodified.
 *Rationale:* three separate functions put the burden on every future caller to remember
 all of them, and the conftest fixture is exactly the place where forgetting one is
 invisible. Deleting `reset_vector_store()` would be cleaner long-term but edits tests
-the ticket asks to leave alone. Drives AC-7, AC-10, AC-11.
+the ticket asks to leave alone. Drives AC-7, AC-11, AC-12.
 
 ### OQ-3 — Are the botocore timeouts in this change, and with which numbers? — **Closed**
 
