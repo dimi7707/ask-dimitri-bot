@@ -25,8 +25,16 @@ consequence is not construction but that a new botocore client cannot reuse the
 previous one's keep-alive HTTPS connection to the Bedrock endpoint.
 
 API facts confirmed in the installed versions (langchain-aws 1.7.3, botocore 1.43.78):
-`ChatBedrock` exposes a `config` field and a `client` field; boto3 clients expose
-`close()`. Both are load-bearing below.
+
+- `ChatBedrock` exposes a `config` field (`langchain_aws/llms/bedrock.py:763`).
+- `ChatBedrock` builds **two** boto3 clients, not one: `self.client` for
+  `bedrock-runtime` (`:948`) and `self.bedrock_client` for the `bedrock` control plane
+  (`:976`), both assigned when not supplied, both receiving the effective config.
+- boto3 clients expose `close()`.
+- botocore's default retry config is `legacy` mode with **5 attempts**; its default
+  read timeout is 60 s.
+
+All four are load-bearing below.
 
 ## Decisions
 
@@ -50,7 +58,7 @@ machinery for the same result, and it moves provider access off the `Depends` pa
 the routes and tests share. This is the same reasoning `adb-001` recorded, applied to
 the siblings it deferred.
 
-### Release through a separate `Closeable` protocol, not the capability protocols
+### Release through a separate `Closeable` protocol, **plus** a requirement that providers implement it
 
 New file `app/integrations/lifecycle.py`:
 
@@ -66,18 +74,40 @@ class Closeable(Protocol):
 
 Implementations: `PgVectorStoreProvider.close()` disposes its engine;
 `BedrockEmbeddingProvider.close()` closes its boto3 client;
-`BedrockGenerationProvider.close()` closes the client held by its `ChatBedrock`
-(`self._chat_model.client`) if one was ever built, then drops the reference.
+`BedrockGenerationProvider.close()` closes **both** clients its `ChatBedrock` owns —
+`self._chat_model.client` and `self._chat_model.bedrock_client` — if a chat model was
+ever built, then drops the reference.
 
 *Why not `close()` on `VectorStoreProvider` / `EmbeddingProvider` /
 `GenerationProvider`?* They are `runtime_checkable`, so `isinstance` checks method
-presence — adding `close()` breaks the protocol assertions for every existing double
-(`tests/api/fakes.py`, both `test_factory.py` modules) until each grows a method that
-releases nothing. A separate protocol removes the `getattr(provider, "_engine", None)`
-sniffing that `adb-001` flagged in task 5.7, which was the actual defect, at zero churn
-to current fakes. The coupling to `ChatBedrock.client` sits inside a
-`*_provider.py` file, which is the one place the architecture test permits vendor
-coupling.
+presence — adding `close()` breaks the four doubles that are explicitly
+protocol-asserted (`tests/integrations/{embeddings,generation,vector_store}/test_factory.py`
+and `tests/api/test_deps.py:51`) until each grows a method that releases nothing. The
+doubles in `tests/api/fakes.py` are satisfied structurally and never
+`isinstance`-checked, so they are unaffected either way. A separate protocol removes
+the `getattr(provider, "_engine", None)` coupling at zero churn to current fakes.
+
+**`isinstance` alone does not retire `adb-001` task 5.7, so AC-13 does.** A
+`runtime_checkable` Protocol check is method *presence*: a provider that owns a resource
+and omits `close()` returns `False`, is dropped from the cache unreleased, and — since
+this change adds no telemetry — says nothing. That is the same silent leak task 5.7
+described, with `getattr` swapped for a quiet `False`. The honest fix is a presence
+*requirement*, not a presence *check*:
+
+```python
+# tests/integrations/test_registry.py (extending the existing registry test)
+@pytest.mark.parametrize("provider_name,build", _every_registered_provider())
+def test_every_cached_provider_declares_its_release_contract(provider_name, build):
+    assert isinstance(build(), Closeable), (
+        f"{provider_name} is reachable through a cached dependency but declares no "
+        "close(); release would skip it silently and abandon its resource"
+    )
+```
+
+The three `PROVIDERS` dicts in `embeddings/factory.py:17`, `generation/factory.py:17`
+and `vector_store/factory.py` are an **enumerable** registry, which is what makes this
+a real gate rather than a hope. The coupling to `ChatBedrock`'s attributes sits inside a
+`*_provider.py` file, the one place the architecture test permits vendor coupling.
 
 ### One `reset_providers()`, clearing every cache even when a release fails
 
@@ -93,7 +123,7 @@ def reset_providers() -> None:
         except Exception as error:
             failures.append(error)
     if failures:
-        raise failures[0]
+        raise failures[0] if len(failures) == 1 else ExceptionGroup("provider release failed", failures)
 
 def _release(dependency) -> None:
     try:
@@ -112,52 +142,96 @@ def reset_vector_store() -> None:
 The per-dependency `finally` is what AC-11 rests on, and the loop's exception
 collection extends it across the family: without collecting, one provider's failing
 `close()` would abort the loop and leave the remaining caches populated — the exact
-cross-test contamination the reset exists to prevent. The first failure is re-raised so
-a broken release is still loud, preserving the propagation `adb-001`'s
-`test_reset_vector_store_clears_the_cache_even_if_dispose_fails` asserts.
+cross-test contamination the reset exists to prevent.
+
+**Every failure is reported, not just the first.** A bare `raise failures[0]` would
+discard the rest, and with no telemetry in this change they would vanish entirely while
+the tuple's ordering silently decided which error a caller saw. A single failure is
+re-raised as itself, so `adb-001`'s
+`test_reset_vector_store_clears_the_cache_even_if_dispose_fails` — which asserts
+`pytest.raises(RuntimeError)` — keeps passing unmodified; multiple failures are raised
+as an `ExceptionGroup` (Python 3.12, which this project targets).
 
 `reset_vector_store()` is kept and re-expressed over `_release`, so the `adb-001` tests
 calling it by name pass unmodified. Its behavior is unchanged: disposal via
 `PgVectorStoreProvider.close()` instead of the `getattr` sniff.
 
-### Bedrock timeouts in `Settings`, applied to both clients
+### Bedrock timeouts in `Settings`, applied to every client, at the cost of retries
 
 ```python
 # inside each bedrock_provider.py
 config=Config(
-    connect_timeout=settings_connect_timeout,   # default 3
-    read_timeout=settings_read_timeout,         # default 8
-    retries={"mode": "standard", "max_attempts": settings_max_attempts},  # default 2
+    connect_timeout=connect_timeout,   # default 3
+    read_timeout=read_timeout,         # default 8
+    retries={"mode": "standard", "max_attempts": max_attempts},  # default 2
 )
 ```
 
 Three new `Settings` fields — `bedrock_connect_timeout` (`gt=0`),
-`bedrock_read_timeout` (`gt=0`), `bedrock_max_attempts` (`ge=1`) — threaded from each
-factory into its provider, exactly as `adb-001` threaded `db_pool_size`.
+`bedrock_read_timeout` (`gt=0`), `bedrock_max_attempts` (`ge=1`).
+
+**Which `Settings` instance feeds them.** The process-wide one, via `get_settings()`
+inside each `_build_bedrock_provider()`. This is explicit because the alternative is a
+plausible misreading: `_build_bedrock_provider()` takes **no parameters** today
+(`embeddings/factory.py:7`, `generation/factory.py:7`), and the `settings` argument on
+`get_embedding_provider` / `get_generation_provider` is used only to pick the registry
+key (`:22-24` in each). So an explicit `Settings` passed to the factory selects *which
+provider* is built, not *how it is configured* — exactly as `adb-001`'s pool settings
+behave, and why `tests/api/test_deps.py:199-211` monkeypatches
+`vector_store_factory.get_settings` rather than passing settings in. **The registry
+callables do not gain a parameter in this change.** `openspec/specs/provider-lifecycle/spec.md:52-55`
+currently claims the opposite ("the provider reflects the supplied settings rather than
+the process-wide settings"); task 6.1 narrows that scenario instead of copying it onto
+the siblings.
 
 *Why `Settings` and not literals?* `adb-001` shipped `pool_size=1` as a literal and its
 review made it configurable, because the same image runs under uvicorn in
-`docker compose` where the Lambda-shaped default is wrong. The same argument applies
-here, and the bounds exist for the same reason the pool bounds do: botocore reads a
-`connect_timeout` of 0 or `None` as *no timeout*, the inverse of the intent, and that is
-one `.env` typo away.
+`docker compose` where the Lambda-shaped default is wrong. The bounds exist for the same
+reason the pool bounds do: botocore reads a `connect_timeout` of 0 or `None` as *no
+timeout*, the inverse of the intent, and that is one `.env` typo away.
 
-*Why both clients?* The ticket configures only embeddings, but generation makes up to
-two of the three Bedrock calls per question; leaving it at botocore's 60 s default is
-the asymmetry with no defense.
+*Why every client?* The ticket configures only embeddings, but generation makes two of
+the three Bedrock calls per question, and `ChatBedrock` builds two clients of its own.
+Leaving any of them at botocore's 60 s default is an asymmetry with no defense.
+
+**The retry reduction is deliberate and is the price of the ceiling.** botocore defaults
+to `legacy` mode with 5 attempts; this sets `standard` mode with 2. Five attempts cannot
+fit inside 30 s (5 × 11 s = 55 s), so a real per-call ceiling necessarily retries less —
+a throttled call surfaces after 2 attempts instead of 5. `spec.md`'s *Non-goals* states
+this rather than leaving it to be found in production. If throttling resilience should
+win, `read_timeout=6, max_attempts=3` (~27 s) is the alternative recorded in OQ-3.
 
 ### Prove reuse by identity, recorded from inside the request
 
-Following `adb-001`: the identity assertions record the object *inside*
-`embed()` and inside the generation call, not by reading
-`deps.get_embedder()` back from the module. Reading it back bypasses FastAPI's
-dependency resolution, so a future route that stopped using the cached dependency
-would leave the test green while per-request construction returned.
+Following `adb-001`: the identity assertions record the object *inside* `embed()` and
+inside the generation call, not by reading `deps.get_embedder()` back from the module.
+Reading it back bypasses FastAPI's dependency resolution, so a future route that stopped
+using the cached dependency would leave the test green while per-request construction
+returned.
+
+Identity alone is not enough, and the same reasoning applies to clients as to providers:
+AC-1/AC-2 count factory invocations, and AC-3 counts `boto3.client` constructions.
+Provider identity implies client identity only because `BedrockEmbeddingProvider` builds
+its client eagerly — an implementation fact, not a tested one, and a refactor to a lazy
+per-call client would keep an identity-only test green while reintroducing the very
+handshake churn this change exists to remove.
+
+For AC-4 the double is installed by patching the module symbol
+`generation.bedrock_provider.ChatBedrock`, **not** by passing
+`BedrockGenerationProvider(chat_model=...)`. The constructor seam already exists
+(`bedrock_provider.py:8-11`) and the existing provider tests use it
+(`tests/integrations/generation/test_bedrock_provider.py:31-33`), but injecting there
+skips `_get_chat_model()`'s lazy branch entirely — the test would prove the provider is
+reused (already AC-2) and leave AC-4's actual claim unproven.
 
 The timeout configuration is asserted by capturing the kwargs the provider passes to
 `boto3.client` / `ChatBedrock`, not by reading botocore internals off the built client —
 same rationale as `adb-001`'s `create_engine` capture: an upstream rename should produce
-a meaningful failure, not an `AttributeError`.
+a meaningful failure, not an `AttributeError`. The residual: `ChatBedrock` also exposes
+its own `read_timeout` / `connect_timeout` fields that **merge over** `config`
+(`langchain_aws/llms/bedrock.py:765-773`), so a later change setting those would satisfy
+the capture while altering the effective ceiling. Accepted — asserting the built
+client's private config trades one blind spot for a more brittle one.
 
 ## Affected layers
 
@@ -170,38 +244,57 @@ Nothing here inverts that.
 | integrations (new) | `app/integrations/lifecycle.py` | `Closeable` protocol; imports only `typing` |
 | integrations | `app/integrations/vector_store/pgvector_provider.py` | add `close()` disposing the engine |
 | integrations | `app/integrations/embeddings/bedrock_provider.py` | `Config(...)` on the client; add `close()` |
-| integrations | `app/integrations/generation/bedrock_provider.py` | `config=` on `ChatBedrock`; add `close()`; docstring now true |
-| integrations | `app/integrations/embeddings/factory.py`, `generation/factory.py` | thread the three timeout settings into the providers |
+| integrations | `app/integrations/generation/bedrock_provider.py` | `config=` on `ChatBedrock`; `close()` for both its clients; docstring now true |
+| integrations | `app/integrations/embeddings/factory.py`, `generation/factory.py` | read the three timeout settings from `get_settings()` and pass them to the provider |
 | core | `app/core/config.py` | three bounded `Settings` fields |
-| api | `app/api/deps.py` | `@lru_cache` on both dependencies; `reset_providers()`; `reset_vector_store()` over `_release` |
+| api | `app/api/deps.py` | `@lru_cache` on both dependencies; `reset_providers()`; `reset_vector_store()` over `_release`; module docstring updated (it currently explains the cache in terms of "a provider that owns connections") |
 | tests | `tests/api/conftest.py` | autouse fixture calls `reset_providers()` |
-| tests | `tests/api/test_deps.py` | new reuse/release/timeout tests; `fresh_settings` also resets providers |
-| tests | `tests/api/fakes.py` | a closeable double recording `close()` |
+| tests | `tests/api/test_deps.py` | new reuse/release tests; `fresh_settings` also resets providers |
+| tests | `tests/api/fakes.py` | a closeable double recording `close()`, and one whose `close()` raises |
+| tests | `tests/integrations/embeddings/test_bedrock_provider.py` | captured-kwargs assertions for the `Config`; `close()` behavior |
+| tests | `tests/integrations/generation/test_bedrock_provider.py` | captured-kwargs assertions; `close()` closes both clients |
+| tests | `tests/integrations/test_registry.py` | AC-13: every registered provider declares `Closeable` |
+| tests | `tests/core/test_config.py` | `ValidationError` for ceiling-removing values |
+| tests | `tests/architecture/test_integration_boundaries.py` | AC-8: `ingestion/` must not import `app.api.deps` |
 | docker | `docker/docker-compose.yml` | pass the three env vars through, as `adb-001` did for the pool |
-| capability spec | `openspec/specs/provider-lifecycle/spec.md` | generalize purpose; add requirements for the sibling providers and `Closeable` |
+| config docs | `.env.example` | document the three `BEDROCK_*` vars — `adb-001` landed its pool vars here too |
+| docs | `README.md` | add the three vars to the environment table; correct "two Bedrock calls" to three (`README.md:316`) |
+| capability spec | `openspec/specs/provider-lifecycle/spec.md` | generalize purpose; add sibling-provider, `Closeable` and ceiling requirements; narrow the false settings scenario at `:52-55` |
 
 ## Invariant → enforcement
 
 | AC | Invariant | Chokepoint | Proof |
 |---|---|---|---|
-| AC-1 | Embedding provider built at most once per process | `@lru_cache` on `deps.get_embedder` — the single resolution path for the route | `tests/api/test_deps.py` — identity across two calls **plus** a build counter asserting the factory ran once |
-| AC-2 | Generation provider built at most once per process | `@lru_cache` on `deps.get_generator` | same shape as AC-1 |
+| AC-1 | Embedding provider built at most once per process, absent an override or a release | `@lru_cache` on `deps.get_embedder` — the single resolution path for the route | `tests/api/test_deps.py` — identity across two calls **plus** a build counter asserting the factory ran once |
+| AC-2 | Generation provider built at most once per process, same conditions | `@lru_cache` on `deps.get_generator` | same shape as AC-1 |
 | AC-5 | A registered override always wins over the cache | FastAPI's own override resolution, which runs before the dependency is called | `tests/api/test_deps.py` — override registered, `/chat` issued, fake recorded the call and no real client was constructed |
-| AC-9 | Every Bedrock client carries a bounded ceiling | The two provider constructors are the only call sites that build a Bedrock client | `tests/integrations/{embeddings,generation}/test_bedrock_provider.py` — captured kwargs assert `connect_timeout`, `read_timeout`, `max_attempts` |
+| AC-9 | Every Bedrock client this code builds carries a bounded ceiling | **The registry assertion in `tests/integrations/test_registry.py`**, parameterized over every entry of the three `PROVIDERS` dicts — *not* the two construction sites, which are two places and therefore no place | `tests/integrations/{embeddings,generation}/test_bedrock_provider.py` for the values at each site; the registry test for the universal, so a third Bedrock provider cannot land unbounded |
 | AC-10 | A ceiling-removing value is rejected, not accepted | `Settings` field constraints (`gt=0`, `ge=1`) — validation happens before any provider is built | `tests/core/test_config.py` — `ValidationError` for `0`/negative timeout and `0` attempts |
-| AC-11 | A release never leaves a populated cache behind | `_release`'s `finally`, plus `reset_providers()` collecting failures across the loop | `tests/api/test_deps.py` — a double whose `close()` raises; assert all three caches empty and the error propagates |
+| AC-11 | A release never leaves a populated cache behind, and never fails silently | `_release`'s `finally`, plus `reset_providers()` collecting failures across the loop and raising them | `tests/api/test_deps.py` — a double whose `close()` raises; assert all three caches empty and the error surfaces |
+| AC-13 | Every provider behind a cached dependency declares its release contract | The three `PROVIDERS` registries are the single enumerable list of providers that exist | `tests/integrations/test_registry.py` — parameterized `isinstance(..., Closeable)` over every registered provider |
 
 AC-3, AC-4, AC-6, AC-7, AC-8 and AC-12 are behavioral rather than invariants; their
 tests are listed in `tasks.md`.
 
 ## Gates this change adds
 
-- **`tests/architecture/test_integration_boundaries.py` (existing, unchanged).** It
-  rejects a `botocore.config` import from anywhere under `app/` or `ingestion/` that is
-  not a `*_provider.py` directly inside `app/integrations/<capability>/`. It therefore
-  catches the plausible mistake of building the `Config` in a factory or in `deps.py`.
-  **What still passes it:** `lifecycle.py` (typing only), and any SDK import inside the
-  provider files — including a careless one. It is a location gate, not a usage gate.
+- **`tests/architecture/test_integration_boundaries.py` (existing, extended).** As it
+  stands it rejects a `botocore.config` import from anywhere under `app/` or
+  `ingestion/` that is not a `*_provider.py` directly inside
+  `app/integrations/<capability>/`. **What still passes it:** a new
+  `other_provider.py` building an unbounded client — it is a *location* gate, not a
+  *usage* gate, which is exactly why AC-9's chokepoint is the registry assertion and
+  not this. It also structurally **forbids** a shared `Config` builder module (any
+  `app/integrations/bedrock_config.py` importing `botocore.config` fails the build),
+  which is why no such module appears above. This change extends it with one rule:
+  `ingestion/` must not import `app.api.deps`, giving AC-8 a gate instead of a manual
+  check.
+- **The registry assertion (new).** Parameterized over the `PROVIDERS` dicts, it fails
+  the build when a provider reachable through a cached dependency declares no
+  `close()`. **What still passes it:** a provider that implements `close()` as a no-op
+  while holding a resource. That is a weaker promise than "no leaks", and it is the
+  strongest promise an enumerable registry can make without inspecting each provider's
+  internals.
 - **`Settings` field bounds (new).** `gt=0` / `ge=1` reject `0`, negatives, and
   non-numerics at startup. **What still passes:** a syntactically valid but useless
   ceiling — `bedrock_read_timeout=600` is accepted and silently exceeds the Lambda
@@ -211,7 +304,9 @@ tests are listed in `tasks.md`.
   non-goal rather than a claimed guarantee.
 - **The build-counter assertions (new).** Asserting `a is b` alone passes vacuously if
   something memoizes one layer down; counting factory invocations is what makes AC-1
-  and AC-2 real.
+  and AC-2 real, and counting `boto3.client` constructions is what makes AC-3 real.
+  **Precondition:** these counters are order-dependent until the reset fixture exists,
+  which is why `tasks.md` lands the reset in the same group as the caches.
 
 ## Risks / trade-offs
 
@@ -227,13 +322,19 @@ tests are listed in `tasks.md`.
 - **A failed `ChatBedrock` construction is retried per request** → **accepted**
   (OQ-4). AC-4 is scoped to the success path. On a credential-less machine the ~90 s
   block still repeats; fast-failing it needs A1's error handling to be meaningful.
+- **Fewer retries against a throttle-prone endpoint** → **accepted deliberately**, and
+  recorded in `spec.md`'s *Non-goals*: 2 attempts instead of botocore's default 5 is
+  what buys a ceiling inside 30 s. If `/chat` starts surfacing `ThrottlingException`,
+  the recorded alternative is `read_timeout=6, max_attempts=3`.
 - **A cached provider outlives a `Settings` change** → only matters in tests, where
   `fresh_settings` now resets providers too. In Lambda, settings are fixed per
   container.
-- **`BedrockGenerationProvider.close()` depends on `ChatBedrock.client`** → verified
-  present in langchain-aws 1.7.3; an upstream rename degrades it to closing nothing.
-  Mitigated by keeping the access inside the provider file and asserting `close()`
-  behavior in that provider's own test.
+- **`close()` depends on `ChatBedrock`'s `client` and `bedrock_client` attributes** →
+  both verified present in langchain-aws 1.7.3; an upstream rename degrades `close()`
+  to releasing less than it should. Mitigated by keeping the access inside the provider
+  file and asserting in that provider's own test that both clients are closed.
+- **A provider can satisfy `Closeable` with a no-op `close()`** → the registry gate
+  proves declaration, not diligence. Accepted as the limit of a structural check.
 - **A third timeout triple is one more thing to configure** → the defaults are the
   Lambda-correct values, so only a non-Lambda runtime needs to touch them.
 
@@ -244,25 +345,31 @@ Lambda container image build. Deploy order is irrelevant — nothing outside the
 observes the cache.
 
 Rollback is a straight revert: dropping the two decorators restores per-request
-providers, dropping the `Config` restores botocore defaults. Neither direction touches
-persisted state.
+providers, dropping the `Config` restores botocore defaults — including the 5-attempt
+retry budget, which is worth knowing if the revert is motivated by throttling.
 
 Post-deploy signal: p50 latency on `POST /chat` drops by roughly the handshake time to
 the Bedrock endpoint for the second and later questions in a container, and a hung
 Bedrock call now surfaces as a provider-level timeout at ~22 s instead of the Lambda's
-own 30 s cutoff. No new telemetry is added — observability is not in scope.
+own 30 s cutoff. No new telemetry is added — observability is not in scope, which is
+also why a silently-skipped release would be invisible, and therefore why AC-13 is a
+build-time gate rather than a runtime warning.
 
 ## ADR impact
 
 This repo keeps no ADR directory, so the decision is recorded here and in the capability
 spec. The architectural rule this change establishes:
 
-> **Providers that own a releasable resource declare it by implementing `Closeable`.**
-> Cached-provider release goes through that protocol — never by reaching for a private
-> attribute. Caching stays at the argument-less dependency layer; factories remain
-> uncached because they accept an unhashable `Settings`.
+> **Providers that own a releasable resource declare it by implementing `Closeable`,
+> and every provider reachable through a cached dependency is checked for that
+> declaration at build time.** Cached-provider release goes through that protocol —
+> never by reaching for a private attribute. Caching stays at the argument-less
+> dependency layer; factories remain uncached because they accept an unhashable
+> `Settings`, and an explicit `Settings` selects which provider is built, not how it is
+> configured.
 
-The first clause is new (and retires `adb-001` task 5.7); the second restates the rule
-`adb-001` established. Both land in `openspec/specs/provider-lifecycle/spec.md` per
-OQ-7, which is the capability-level contract and the right home for a rule that outlives
-this change.
+The first clause is new (and retires `adb-001` task 5.7, via AC-13 rather than via
+`Closeable` alone); the second restates the rule `adb-001` established; the third
+corrects what `openspec/specs/provider-lifecycle/spec.md:52-55` currently asserts. All
+three land in that capability spec per OQ-7, which is the capability-level contract and
+the right home for a rule that outlives this change.

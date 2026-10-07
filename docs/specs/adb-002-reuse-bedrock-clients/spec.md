@@ -25,7 +25,7 @@ use, then reuse it" — is false across requests today.
 
 Reproduced on `origin/main` (`410e39c`):
 
-```
+```text
 embedder same instance?        False
 embedder same boto3 client?    False
 generator same instance?       False
@@ -58,7 +58,8 @@ exhausting a quota, but it is connection churn, not merely object churn.
 - `_get_chat_model()`'s docstring becomes true: `ChatBedrock` is built once per
   process, not once per request.
 - A single, explicit release contract for cached providers, replacing the attribute
-  sniffing `adb-001` left behind.
+  sniffing `adb-001` left behind — and a check that every cached provider actually
+  participates in it.
 - A bounded ceiling on how long one unresponsive Bedrock call can run.
 - Automated proof of all of the above, and proof that `app.dependency_overrides` and
   the existing factory tests are unaffected.
@@ -69,8 +70,13 @@ exhausting a quota, but it is connection churn, not merely object churn.
   Pydantic `Settings`, which is **not hashable** (confirmed above); memoizing there
   raises `TypeError` in the existing factory tests. Caching belongs at the
   argument-less dependency layer, as it already does for the vector store.
-- Bedrock error handling — `ThrottlingException`, `AccessDeniedException` (finding A1).
-  This change sets timeouts; it does not change what happens when a call fails.
+- Bedrock error *handling* — catching and translating `ThrottlingException` or
+  `AccessDeniedException` into an HTTP response (finding A1). **This change does,
+  however, deliberately shrink the retry budget**: botocore's current default is
+  `legacy` mode with **5 attempts**, and AC-9 replaces it with `standard` mode at
+  **2**. A throttled or 5xx Bedrock call therefore surfaces after two attempts
+  instead of five. That is a real change to failure behavior, forced by the
+  arithmetic in OQ-3, and it is stated here rather than discovered in production.
 - A request-level deadline across the up-to-three Bedrock calls one question makes.
   AC-9 bounds a single call, not the aggregate — see OQ-3.
 - Normalizing `message.content` when it is not a string (finding M1).
@@ -84,16 +90,25 @@ exhausting a quota, but it is connection churn, not merely object churn.
 
 ## Acceptance criteria
 
-- **AC-1** *(invariant)* — The system SHALL resolve the embedding provider at most
-  once per process: repeated resolutions of the `get_embedder` API dependency SHALL
-  return the identical provider object.
-- **AC-2** *(invariant)* — The system SHALL resolve the generation provider at most
-  once per process: repeated resolutions of the `get_generator` API dependency SHALL
-  return the identical provider object.
+> **A note on naming.** Several criteria below name Python symbols
+> (`get_embedder`, `app.dependency_overrides`). That is a deliberate continuation of
+> the precedent in `openspec/specs/provider-lifecycle/spec.md:10-13`, which phrases the
+> same capability over "the `get_vector_store` API dependency". The observable behavior
+> in every case is *what a second request gets*; the symbol names the seam where it is
+> observable in this codebase.
+
+- **AC-1** *(invariant)* — WHILE no override is registered for the embedding
+  dependency and the provider cache has not been released, repeated resolutions of
+  `get_embedder` SHALL return the identical provider object, and the system SHALL NOT
+  construct a second embedding provider for a second request.
+- **AC-2** *(invariant)* — WHILE no override is registered for the generation
+  dependency and the provider cache has not been released, repeated resolutions of
+  `get_generator` SHALL return the identical provider object, and the system SHALL NOT
+  construct a second generation provider for a second request.
 - **AC-3** — WHEN a client sends two consecutive `POST /chat` requests handled by the
   same process, THEN the embedding provider observed from inside the embedding call
-  SHALL be the identical object on both requests, and no second `boto3` client SHALL
-  be created for the second request.
+  SHALL be the identical object on both requests, and exactly **one** `boto3` client
+  SHALL have been constructed across both.
 - **AC-4** — WHEN a client sends two consecutive `POST /chat` requests handled by the
   same process **and the chat model was constructed successfully on the first**, THEN
   the chat model observed from inside the generation call SHALL be the identical object
@@ -104,30 +119,34 @@ exhausting a quota, but it is connection churn, not merely object churn.
   and SHALL NOT return the cached provider, and no real Bedrock client SHALL be
   constructed for that request.
 - **AC-6** — The embedding and generation factories SHALL continue to accept an
-  optional explicit `Settings` argument and SHALL NOT be memoized; the existing tests
-  in `tests/integrations/embeddings/test_factory.py` and
-  `tests/integrations/generation/test_factory.py` SHALL pass unmodified.
+  optional explicit `Settings` argument and SHALL NOT be memoized.
 - **AC-7** — WHEN an API test runs, THEN it SHALL observe no provider cached by a
   previously-run test, so no test's outcome depends on suite ordering.
-- **AC-8** — WHEN the standalone ingestion script runs, THEN it SHALL continue to
-  build its own providers at its entry point, unaffected by the API dependency cache.
-- **AC-9** *(invariant)* — WHEN a provider constructs its Bedrock client, THEN the
-  client SHALL be configured with a connect timeout, a read timeout, and a maximum
+- **AC-8** — WHEN the standalone ingestion script runs, THEN it SHALL build its own
+  providers at its entry point and SHALL NOT resolve them through the API dependency
+  layer.
+- **AC-9** *(invariant)* — WHEN a provider constructs a Bedrock client, THEN **every**
+  client it constructs SHALL carry a connect timeout, a read timeout, and a maximum
   attempt count, defaulting to **3 s**, **8 s**, and **2 attempts** — so one
   unresponsive Bedrock call cannot consume more than ~22 s of the Lambda's 30 s
-  budget. This SHALL apply to the embedding client and to the generation client alike.
-- **AC-10** — The timeout and attempt values SHALL be configurable per runtime without
-  a code change, and configuration SHALL reject values that remove the ceiling (a
-  non-positive timeout or an attempt count below 1), rather than silently accepting an
-  unbounded client.
+  budget. This applies to the embedding provider's client and to **both** clients
+  `ChatBedrock` creates (see OQ-3).
+- **AC-10** *(invariant)* — The timeout and attempt values SHALL be configurable per
+  runtime without a code change, and configuration SHALL reject values that remove the
+  ceiling (a non-positive timeout or an attempt count below 1), rather than silently
+  accepting an unbounded client.
 - **AC-11** *(invariant)* — WHEN the cached providers are released, THEN every cached
   provider that exposes a release operation SHALL have it invoked before its cache
-  entry is dropped, and **every** cache entry SHALL be dropped even if a release
-  raises, so a failed release never leaves a stale provider behind for the next
-  caller.
+  entry is dropped; **every** cache entry SHALL be dropped even if a release raises;
+  and the release SHALL report at least one failure to its caller rather than
+  completing silently.
 - **AC-12** — IF a release is requested while nothing is cached, THEN the system SHALL
   succeed without constructing a provider — on a cold Lambda, constructing one just to
   release it would resolve credentials for nothing.
+- **AC-13** *(invariant)* — Every provider reachable through a cached API dependency
+  SHALL declare its release contract, and a provider that owns a releasable resource
+  without declaring it SHALL fail the build rather than be skipped silently at release
+  time.
 
 ## Open questions
 
@@ -144,21 +163,32 @@ All raised by the blindspot pass and resolved with the requester before planning
 
 **Decision: land it as a separate `Closeable` protocol**, not as a method on the three
 capability protocols. `PgVectorStoreProvider.close()` disposes its engine; the Bedrock
-providers close their boto3 client. The release path tests `isinstance(provider,
-Closeable)` instead of sniffing `_engine`.
+providers close their clients. The release path tests `isinstance(provider, Closeable)`
+instead of sniffing `_engine`.
 
 *Rationale:* the capability protocols are `runtime_checkable`, so adding `close()` to
-them would make `isinstance` fail for every existing test double until each one grows a
-method that releases nothing — churn across `tests/api/fakes.py` and both
-`test_factory.py` files for no behavioral gain. A separate protocol removes the
-`getattr` sniffing (the actual defect adb-001 flagged) while leaving every current fake
-valid. Drives AC-11.
+them would make `isinstance` fail for every double that is explicitly protocol-checked
+— `tests/integrations/embeddings/test_factory.py:14`,
+`generation/test_factory.py:14`, `vector_store/test_factory.py:32`, and
+`tests/api/test_deps.py:51` — until each grows a method that releases nothing. (The
+doubles in `tests/api/fakes.py` satisfy the protocols *structurally* and are never
+`isinstance`-checked, so they would be unaffected either way.) A separate protocol
+removes the `getattr` sniffing while leaving every current fake valid.
+
+**Correction after review.** `isinstance` against a `runtime_checkable` Protocol is a
+method-*presence* test, so a provider that owns a resource and simply omits `close()`
+returns `False` and is dropped unreleased — the identical silent leak `adb-001`
+described, with `getattr` swapped for a quiet `False`. A presence *check* is not a
+presence *requirement*. AC-13 therefore adds the requirement, enforced over the
+enumerable `PROVIDERS` registries, and this change retires `adb-001` task 5.7 only
+because AC-13 exists — not because `Closeable` exists. Drives AC-11, AC-13.
 
 ### OQ-2 — What is the reset surface for the two new caches? — **Closed**
 
 `tests/api/conftest.py:20` resets only the vector store, because it was the only cached
-dependency. Two more caches make that fixture incomplete, and `test_deps.py:187`'s
-`fresh_settings` would leave providers built from the *old* `Settings` in place.
+dependency. Two more caches make that fixture incomplete, and the `fresh_settings`
+fixture at `tests/api/test_deps.py:180` would leave providers built from the *old*
+`Settings` in place.
 
 **Decision: one `reset_providers()` in `deps.py`** that walks all three caches, closes
 whatever is `Closeable`, and clears each entry in a `finally`. The autouse fixture in
@@ -178,15 +208,30 @@ does not fit the runtime it cites: `read_timeout=25` with
 `retries={"mode": "standard"}` is **3 attempts**, so the worst case is ~75 s against a
 **30 s** Lambda budget. A ceiling above the enclosing timeout is not a ceiling.
 
-**Decision: in scope, on both clients**, with
+**Decision: in scope, on every Bedrock client this code constructs**, with
 `connect_timeout=3, read_timeout=8, retries={"mode": "standard", "max_attempts": 2}` —
-~22 s worst case per call, inside the 30 s budget. Applied to generation as well as
-embeddings, since generation is the path making up to two of the three calls.
+~22 s worst case per call, inside the 30 s budget.
 
 *Rationale:* botocore's default read timeout is 60 s, so today a single hung call
 consumes the whole Lambda; any correct ceiling is strictly better, and the constructor
 is being touched anyway. Configuring only the embedding client, as the ticket wrote it,
-would leave the busier path at the 60 s default — an asymmetry with no defense.
+would leave the busier path at the default — generation makes two of the three calls.
+
+**The retry budget is being spent to buy the ceiling, and that is a real trade.**
+botocore's current default is `legacy` mode with **5 attempts**; this change moves to
+`standard` mode with **2**. Five attempts cannot coexist with a ceiling inside 30 s
+(5 × 11 s = 55 s), so bounding the call necessarily means retrying less. The
+consequence is that a throttled Bedrock call now reaches the caller after 2 attempts
+where it previously retried 5 times, which is recorded in *Non-goals* rather than left
+implicit. If throttling resilience should outweigh the tight ceiling, the alternative
+is `read_timeout=6, max_attempts=3` (~27 s worst case) — still inside the budget, one
+more attempt, each attempt given less time.
+
+**Two clients, not one.** Verified in langchain-aws 1.7.3: `ChatBedrock` builds
+`self.client` for `bedrock-runtime` **and** `self.bedrock_client` for the `bedrock`
+control plane (`langchain_aws/llms/bedrock.py:948`, `:976`), assigning both when not
+supplied. Both receive the config, so AC-9 holds for both — but only because the
+config is passed, which is why AC-9 says "every client it constructs".
 
 **Recorded limitation:** a per-call ceiling does not bound the aggregate. Three calls at
 ~22 s each still exceed 30 s, so the Lambda timeout remains the backstop for the
@@ -224,7 +269,7 @@ race.
 *Rationale:* losing the race builds one extra `ChatBedrock` that is immediately
 discarded — ~9 ms of waste, once, with no corruption, because the loser's object is
 simply dropped. boto3 clients are thread-safe for making calls, so sharing the cached
-client across threadpool threads is correct. A lock on the hot path of every request to
+client across threadpool threads is correct. A lock on every request's hot path to
 protect a one-time 9 ms waste is the wrong trade.
 
 ### OQ-6 — Does the ticket's priority survive the measurement? — **Closed**
@@ -252,9 +297,16 @@ reused" — and every requirement under it currently says *vector store*. After 
 change that capability spec describes one third of the actual behavior.
 
 **Decision: extend it in the implementing PR** — generalize its purpose line and add
-requirements covering the embedding and generation providers plus the `Closeable`
-contract. The `spec.md` / `plan.md` / `tasks.md` for this change live in `docs/specs/`
-as requested; `openspec/specs/` remains the capability-level contract.
+requirements covering the embedding and generation providers, the `Closeable` contract,
+and the Bedrock ceiling. The `spec.md` / `plan.md` / `tasks.md` for this change live in
+`docs/specs/` as requested; `openspec/specs/` remains the capability-level contract.
+
+**Also correct, do not duplicate.** That capability spec currently asserts a scenario
+the code does not satisfy: "the provider reflects the supplied settings rather than the
+process-wide settings" (`openspec/specs/provider-lifecycle/spec.md:52-55`). The
+`_build_*_provider()` callables in the registries take no arguments and read
+`get_settings()` directly, so an explicit `Settings` selects the *registry key* only.
+That scenario must be narrowed, not copied onto the sibling providers.
 
 *Rationale:* leaving it untouched would park an active document that states something
 false about the system. Migrating the capability into `docs/` entirely is the coherent
@@ -272,7 +324,9 @@ end state but exceeds this ticket and deserves its own chore.
   `llama_index` unless it is a `*_provider.py` file directly under an
   `integrations/<capability>/` package. The `botocore.config.Config` from AC-9 must
   therefore live inside the `bedrock_provider.py` files, and the `Closeable` protocol
-  must not import a vendor SDK.
+  must not import a vendor SDK. **This also forbids** a single shared config-builder
+  module, which is why AC-9's chokepoint is a registry-wide assertion rather than one
+  construction site — see `plan.md`.
 - **Caching belongs to the dependency layer, not the factory** — established by
   `adb-001` and documented in `app/api/deps.py:6-8` and
   `openspec/specs/provider-lifecycle/spec.md` ("Provider factories accept explicit

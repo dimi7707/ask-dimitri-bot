@@ -6,7 +6,7 @@ identifier derived from the ticket's subject and prefixed with the ticket id
 every commit. Once set it never changes: renaming it orphans the spec directory
 from its branch and its history.
 
-```
+```text
 docs/specs/<slug>/
   ticket.md   — the original request, verbatim. A pasted ticket has no other
                 system of record, so this directory becomes it.
