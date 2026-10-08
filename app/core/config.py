@@ -11,6 +11,16 @@ class Settings(BaseSettings):
     bedrock_model_id: str = "amazon.nova-micro-v1:0"
     embedding_model_id: str = "amazon.titan-embed-text-v2:0"
 
+    # Ceiling on a single Bedrock call, applied to every client the providers build. The defaults
+    # are sized for Lambda's 30 s timeout: 2 attempts x (3 s connect + 8 s read) is ~22 s worst
+    # case, where botocore's own defaults (60 s read, legacy mode's 5 attempts) let one hung call
+    # consume the whole budget. The tighter ceiling costs retries, which is the deliberate trade.
+    # Bounded because botocore reads a timeout of 0 or None as *no timeout* — the inverse of the
+    # intent here, and one `.env` typo away.
+    bedrock_connect_timeout: float = Field(default=3, gt=0)
+    bedrock_read_timeout: float = Field(default=8, gt=0)
+    bedrock_max_attempts: int = Field(default=2, ge=1)
+
     # RAG retrieval tuning.
     similarity_threshold: float = 0.6
     similarity_top_k: int = 5

@@ -221,6 +221,8 @@ environment variable. See `.env.example` for a ready-to-copy local set.
 | --- | --- | --- |
 | `BEDROCK_MODEL_ID` | `amazon.nova-micro-v1:0` | Generation model |
 | `EMBEDDING_MODEL_ID` | `amazon.titan-embed-text-v2:0` | Embedding model (1024 dimensions) |
+| `BEDROCK_CONNECT_TIMEOUT` / `BEDROCK_READ_TIMEOUT` | `3` / `8` | Per-call ceiling (seconds) on every Bedrock client the providers build. Sized for Lambda's 30 s timeout; botocore's own default read timeout is 60 s, which lets one hung call consume the whole budget |
+| `BEDROCK_MAX_ATTEMPTS` | `2` | Attempts per Bedrock call, under botocore's `standard` retry mode. Deliberately below botocore's default of 5: five attempts cannot fit inside 30 s, so bounding the call means retrying less. Raise it (and lower the read timeout) if throttling matters more than the tight ceiling |
 | `SIMILARITY_THRESHOLD` | `0.6` | Below this best score, the assistant declines instead of generating |
 | `SIMILARITY_TOP_K` | `5` | Chunks requested from the vector store |
 | `INCLUDE_DEBUG_CONTEXT` | `false` | Adds `debug_context` (chunks + scores) to `/chat` responses |

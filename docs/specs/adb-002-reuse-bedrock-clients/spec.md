@@ -154,8 +154,20 @@ exhausting a quota, but it is connection churn, not merely object churn.
   defaulting to **3 s**, **8 s**, and **2 attempts** — so one unresponsive Bedrock call
   cannot consume more than ~22 s of the Lambda's 30 s budget. This applies to the
   embedding provider's client and to **both** clients `ChatBedrock` creates (see OQ-3).
-  The retry mode is part of the contract: `max_attempts` without `standard` mode leaves
+  The retry mode is part of the contract: an attempt count without `standard` mode leaves
   legacy backoff semantics in place and changes what the arithmetic means.
+
+  **"2 attempts" means two calls, and the implementation corrects the key this spec and
+  `plan.md` originally named.** botocore has two retry keys that differ by exactly one:
+  `max_attempts` in a client `Config` counts retries *after* the initial request, so a `2`
+  there permits **three** calls (~33 s) and overshoots the 30 s budget — the same defect
+  OQ-3 rejected in the ticket's own proposal. `total_max_attempts` includes the initial
+  request, and botocore's documentation prefers it for that reason
+  (`botocore/config.py:147-161`; the `+ 1` is at `botocore/args.py:620`). The shipped code
+  therefore passes `retries={"mode": "standard", "total_max_attempts": …}` and
+  `tests/integrations/{embeddings,generation}/test_bedrock_provider.py` assert the key,
+  because the wrong one validates silently. Verified on a real client: `connect_timeout 3.0`,
+  `read_timeout 8.0`, `total_max_attempts 2` — ~22 s worst case, as stated above.
 
   *Not marked `(invariant)`.* An invariant needs one chokepoint, and this has two — the
   two provider constructors. The repo's own rule says an invariant enforced in two
@@ -254,8 +266,9 @@ does not fit the runtime it cites: `read_timeout=25` with
 **30 s** Lambda budget. A ceiling above the enclosing timeout is not a ceiling.
 
 **Decision: in scope, on every Bedrock client this code constructs**, with
-`connect_timeout=3, read_timeout=8, retries={"mode": "standard", "max_attempts": 2}` —
-~22 s worst case per call, inside the 30 s budget.
+`connect_timeout=3, read_timeout=8, retries={"mode": "standard", "total_max_attempts": 2}` —
+~22 s worst case per call, inside the 30 s budget. (Written here as `max_attempts` before
+implementation; see AC-9's correction for why that key would have meant three calls.)
 
 *Rationale:* botocore's default read timeout is 60 s, so today a single hung call
 consumes the whole Lambda; any correct ceiling is strictly better, and the constructor

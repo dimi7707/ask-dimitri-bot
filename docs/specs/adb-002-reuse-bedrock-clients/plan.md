@@ -182,9 +182,19 @@ which reinstates exactly the coupling OQ-1 exists to remove.
 config=Config(
     connect_timeout=connect_timeout,   # default 3
     read_timeout=read_timeout,         # default 8
-    retries={"mode": "standard", "max_attempts": max_attempts},  # default 2
+    retries={"mode": "standard", "total_max_attempts": max_attempts},  # default 2
 )
 ```
+
+**Correction, found at implementation time: the key is `total_max_attempts`, not
+`max_attempts`.** This sketch originally named the latter, and botocore's two keys differ by
+exactly one: `max_attempts` in a client `Config` counts retries *after* the initial request, so
+botocore rewrites it as `total_max_attempts = value + 1` (`botocore/args.py:600-620`). Passing
+`2` there would permit **three** calls at ~11 s each — ~33 s, outside the 30 s Lambda budget, which
+is the very shape of defect OQ-3 rejected in the ticket's proposal. `total_max_attempts` includes
+the initial request and is what botocore's own documentation prefers
+(`botocore/config.py:147-161`). Both provider tests assert the resolved `retries` dict rather than
+just the count, because the wrong key validates without complaint.
 
 Three new `Settings` fields — `bedrock_connect_timeout` (`gt=0`),
 `bedrock_read_timeout` (`gt=0`), `bedrock_max_attempts` (`ge=1`). The retry **mode** is

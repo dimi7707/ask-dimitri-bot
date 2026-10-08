@@ -5,12 +5,21 @@ from app.integrations._registry import resolve_provider
 from app.integrations.generation.base import GenerationProvider
 
 def _build_bedrock_provider() -> GenerationProvider:
+    """Takes no arguments on purpose, and reads the process-wide settings itself.
+
+    An explicit `Settings` passed to `get_generation_provider` selects *which* provider is built —
+    it is the registry key — not how it is configured. Giving this callable a parameter would make
+    the registry's signature a configuration surface, which is not what the dispatch is for.
+    """
     from app.integrations.generation.bedrock_provider import BedrockGenerationProvider
 
     settings = get_settings()
     return BedrockGenerationProvider(
         model_id=settings.bedrock_model_id,
         region=settings.aws_region,
+        connect_timeout=settings.bedrock_connect_timeout,
+        read_timeout=settings.bedrock_read_timeout,
+        max_attempts=settings.bedrock_max_attempts,
     )
 
 
