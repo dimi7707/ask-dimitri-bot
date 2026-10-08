@@ -80,8 +80,15 @@ def reset_providers() -> None:
     prevent. A lone failure is re-raised as itself so callers can still match on its type; several
     are raised together, because picking one would make the tuple's ordering decide silently which
     error a caller gets to see.
+
+    The bound is `Exception`, deliberately. A `BaseException` mid-release — a `KeyboardInterrupt`, a
+    `SystemExit` — is a request to stop now, and continuing to release providers in order to honor
+    AC-11's "every cache entry" clause would be the wrong answer to it: the remaining caches are
+    about to die with the process anyway. So one propagates immediately, leaving the caches after it
+    populated. (It would also not fit: `ExceptionGroup` rejects a non-`Exception` member, so
+    grouping one would need `BaseExceptionGroup` and a different contract for callers.)
     """
-    failures: list[BaseException] = []
+    failures: list[Exception] = []
     for dependency in _CACHED_PROVIDER_DEPENDENCIES:
         try:
             _release(dependency)

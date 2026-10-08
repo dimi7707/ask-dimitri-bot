@@ -222,8 +222,8 @@ key (`:22-24` in each). So an explicit `Settings` passed to the factory selects 
 provider* is built, not *how it is configured* — exactly as `adb-001`'s pool settings
 behave, and why `test_factory_sizes_the_pool_from_settings` in `tests/api/test_deps.py` monkeypatches
 `vector_store_factory.get_settings` rather than passing settings in. **The registry
-callables do not gain a parameter in this change.** `openspec/specs/provider-lifecycle/spec.md:52-55`
-currently claims the opposite ("the provider reflects the supplied settings rather than
+callables do not gain a parameter in this change.** `openspec/specs/provider-lifecycle/spec.md`'s
+*Scenario: Factory called with explicit settings succeeds* claimed the opposite ("the provider reflects the supplied settings rather than
 the process-wide settings"); task 6.1 narrows that scenario instead of copying it onto
 the siblings.
 
@@ -426,6 +426,7 @@ spec. The architectural rule this change establishes:
 
 The first clause is new (and retires `adb-001` task 5.7, via AC-13 rather than via
 `Closeable` alone); the second restates the rule `adb-001` established; the third
-corrects what `openspec/specs/provider-lifecycle/spec.md:52-55` currently asserts. All
+corrects what that capability spec's *Scenario: Factory called with explicit settings
+succeeds* asserted. All
 three land in that capability spec per OQ-7, which is the capability-level contract and
 the right home for a rule that outlives this change.

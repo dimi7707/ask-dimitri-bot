@@ -104,7 +104,8 @@ exhausting a quota, but it is connection churn, not merely object churn.
 
 > **A note on naming.** Several criteria below name Python symbols
 > (`get_embedder`, `app.dependency_overrides`). That is a deliberate continuation of
-> the precedent in `openspec/specs/provider-lifecycle/spec.md:10-13`, which phrases the
+> the precedent in `openspec/specs/provider-lifecycle/spec.md`'s *Requirement: Vector store provider is
+> created once per process*, which phrases the
 > same capability over "the `get_vector_store` API dependency". The observable behavior
 > in every case is *what a second request gets*; the symbol names the seam where it is
 > observable in this codebase.
@@ -253,10 +254,10 @@ because AC-13 exists — not because `Closeable` exists. Drives AC-11, AC-13.
 
 ### OQ-2 — What is the reset surface for the two new caches? — **Closed**
 
-`tests/api/conftest.py:20` resets only the vector store, because it was the only cached
-dependency. Two more caches make that fixture incomplete, and the `fresh_settings`
-fixture at the `fresh_settings` fixture in `tests/api/test_deps.py` would leave providers built from the *old*
-`Settings` in place.
+The autouse fixture in `tests/api/conftest.py` reset only the vector store, because it was
+the only cached dependency. Two more caches make that fixture incomplete, and the
+`fresh_settings` fixture in `tests/api/test_deps.py` would leave providers built from the
+*old* `Settings` in place.
 
 **Decision: one `reset_providers()` in `deps.py`** that walks all three caches, closes
 whatever is `Closeable`, and clears each entry in a `finally`. The autouse fixture in
@@ -370,12 +371,17 @@ requirements covering the embedding and generation providers, the `Closeable` co
 and the Bedrock ceiling. The `spec.md` / `plan.md` / `tasks.md` for this change live in
 `docs/specs/` as requested; `openspec/specs/` remains the capability-level contract.
 
-**Also correct, do not duplicate.** That capability spec currently asserts a scenario
-the code does not satisfy: "the provider reflects the supplied settings rather than the
-process-wide settings" (`openspec/specs/provider-lifecycle/spec.md:52-55`). The
-`_build_*_provider()` callables in the registries take no arguments and read
-`get_settings()` directly, so an explicit `Settings` selects the *registry key* only.
-That scenario must be narrowed, not copied onto the sibling providers.
+**Also correct, do not duplicate.** That capability spec asserted a scenario the code does
+not satisfy: "the provider reflects the supplied settings rather than the process-wide
+settings", under `openspec/specs/provider-lifecycle/spec.md`'s *Scenario: Factory called
+with explicit settings succeeds*. The `_build_*_provider()` callables in the registries
+take no arguments and read `get_settings()` directly, so an explicit `Settings` selects the
+*registry key* only. That scenario must be narrowed, not copied onto the sibling providers.
+
+*As shipped:* narrowed there, with the real behavior stated beside it under *Scenario:
+Configuration comes from the process-wide settings, not the supplied instance*. Cited by
+heading rather than by line range, because this change rewrote that file and a range would
+already be stale.
 
 *Rationale:* leaving it untouched would park an active document that states something
 false about the system. Migrating the capability into `docs/` entirely is the coherent

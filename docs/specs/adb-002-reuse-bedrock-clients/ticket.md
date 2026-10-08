@@ -13,7 +13,7 @@
 > | `_get_chat_model()`'s comment is true — built once per process | same test, plus the rewritten docstring in `app/integrations/generation/bedrock_provider.py` |
 > | The two `test_factory.py` modules pass unmodified | unchanged in this PR; `git log -p` shows no edit to either |
 > | `app.dependency_overrides` still injects fakes in the `/chat` tests | `…::test_registered_override_wins_over_the_cached_embedder` and `…_generator`, plus all of `tests/api/test_chat.py` |
-> | Full suite green | 159 passed, 8 skipped (124 baseline + 35 new) |
+> | Full suite green | 163 passed, 8 skipped (124 baseline + 39 new) |
 >
 > **Two things this ticket asserts that the implementation deliberately did not keep.**
 > *Priority:* labelled crítica / bloqueante para producción above; revised to **High, not

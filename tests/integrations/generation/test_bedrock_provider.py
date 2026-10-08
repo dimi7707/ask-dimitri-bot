@@ -293,3 +293,33 @@ def test_the_attempt_count_bounds_total_calls_not_retries_after_the_first(monkey
     provider.generate(system_prompt=SYSTEM_PROMPT, question="una", context=[])
 
     assert captured["config"].retries == {"mode": "standard", "total_max_attempts": 2}
+
+
+def test_a_failed_chat_model_construction_is_not_memoized(monkeypatch):
+    """OQ-4's resolution, and what scopes AC-4 to the success path — asserted, not just reasoned.
+
+    `_get_chat_model()` assigns only after `ChatBedrock(...)` returns, so a construction that raises
+    leaves `_chat_model` as `None` and the next call retries. A refactor to assign a sentinel inside
+    a `try`, or to construct eagerly, would pin a transient credential failure for the life of the
+    execution environment — now that the provider is cached per process, that would mean every
+    later request in a warm container, not just the one that failed.
+    """
+    rebuilt = FakeChatModel()
+    attempts = []
+
+    def fail_once_then_succeed(**kwargs):
+        attempts.append(kwargs)
+        if len(attempts) == 1:
+            raise RuntimeError("could not resolve credentials")
+        return rebuilt
+
+    monkeypatch.setattr(bedrock_provider, "ChatBedrock", fail_once_then_succeed)
+    provider = BedrockGenerationProvider(model_id="m", region="us-east-1", **CALL_CEILING)
+
+    with pytest.raises(RuntimeError, match="could not resolve credentials"):
+        provider.generate(system_prompt=SYSTEM_PROMPT, question="una", context=[])
+
+    answer = provider.generate(system_prompt=SYSTEM_PROMPT, question="otra", context=[])
+
+    assert len(attempts) == 2, "the failure was memoized; the second call never retried"
+    assert answer == rebuilt._answer

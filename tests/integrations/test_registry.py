@@ -1,6 +1,7 @@
 import pytest
 
 from app.api import deps
+from app.core.config import Settings
 from app.integrations._registry import resolve_provider
 from app.integrations.embeddings import factory as embeddings_factory
 from app.integrations.generation import factory as generation_factory
@@ -59,8 +60,23 @@ def every_registered_provider():
     ]
 
 
+@pytest.fixture
+def settings_pinned_to_defaults(monkeypatch):
+    """Build providers from the declared defaults, never from a developer's `.env`.
+
+    `Settings` reads `.env`, and every registry callable calls `get_settings()` itself, so without
+    this a local `BEDROCK_CONNECT_TIMEOUT=0` or `EMBEDDING_PROVIDER=...` would fail this gate for a
+    reason that has nothing to do with the release contract it exists to enforce — on one machine
+    and not another. Same pinning the API tests use, and for the same stated reason.
+    """
+    for module in (embeddings_factory, generation_factory, vector_store_factory):
+        monkeypatch.setattr(module, "get_settings", lambda: Settings(_env_file=None))
+
+
 @pytest.mark.parametrize(("capability", "provider_name", "build"), every_registered_provider())
-def test_every_cached_provider_declares_its_release_contract(capability, provider_name, build):
+def test_every_cached_provider_declares_its_release_contract(
+    capability, provider_name, build, settings_pinned_to_defaults
+):
     """Every provider behind a cached dependency must declare `close()`, or the build fails.
 
     An `isinstance(provider, Closeable)` *check* in the release path is not a presence

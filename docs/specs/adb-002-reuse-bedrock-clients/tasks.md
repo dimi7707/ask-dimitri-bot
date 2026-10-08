@@ -226,7 +226,7 @@ PR** — the baseline in 1.1 is a measurement, not a gate.
 full suite green at 124 + new tests with 8 skipped; the architecture test passing; the
 capability spec updated and corrected.
 
-*Met.* **159 passed, 8 skipped** — the 124 baseline plus 35 new tests, with the architecture
+*Met.* **163 passed, 8 skipped** — the 124 baseline plus 39 new tests, with the architecture
 test green and `openspec/specs/provider-lifecycle/spec.md` both extended and corrected. Each
 new gate was verified to fail against the unfixed code rather than trusted to pass meaningfully:
 removing the two `@lru_cache` decorators and shrinking the release tuple fails 12 of the new

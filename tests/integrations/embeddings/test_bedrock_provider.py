@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from app.core.config import get_settings
+from app.core.config import Settings
 from app.integrations.embeddings import bedrock_provider
 from app.integrations.embeddings import factory as embeddings_factory
 from app.integrations.embeddings.bedrock_provider import BedrockEmbeddingProvider
@@ -132,22 +132,18 @@ def test_the_attempt_count_bounds_total_calls_not_retries_after_the_first(monkey
     assert captured["config"].retries == {"mode": "standard", "total_max_attempts": 2}
 
 
-@pytest.fixture
-def fresh_settings():
-    """`get_settings` is `lru_cache`d, so an env-var test has to drop the memoized Settings."""
-    get_settings.cache_clear()
-    yield
-    get_settings.cache_clear()
-
-
-def test_the_call_ceiling_flows_from_the_environment_to_the_client(monkeypatch, fresh_settings):
+def test_the_call_ceiling_flows_from_the_environment_to_the_client(monkeypatch):
     """The end-to-end path: env var -> Settings -> factory -> client.
 
     Covering only the halves — that `Settings` reads the variable, and that the provider forwards
     what it is given — would leave the wiring between them untested, which is where a value gets
-    dropped.
+    dropped. A real `Settings` is still constructed from the environment here; only the memoized
+    process-wide one is bypassed, which is incidental to what this asserts.
     """
     captured = capture_boto3_client_kwargs(monkeypatch)
+    # `_env_file=None` so the two variables below are the only configuration in play; a developer's
+    # `.env` must not be able to decide what this asserts.
+    monkeypatch.setattr(embeddings_factory, "get_settings", lambda: Settings(_env_file=None))
     monkeypatch.setenv("BEDROCK_READ_TIMEOUT", "11")
     monkeypatch.setenv("BEDROCK_MAX_ATTEMPTS", "4")
 
