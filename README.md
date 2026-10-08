@@ -221,6 +221,8 @@ environment variable. See `.env.example` for a ready-to-copy local set.
 | --- | --- | --- |
 | `BEDROCK_MODEL_ID` | `amazon.nova-micro-v1:0` | Generation model |
 | `EMBEDDING_MODEL_ID` | `amazon.titan-embed-text-v2:0` | Embedding model (1024 dimensions) |
+| `BEDROCK_CONNECT_TIMEOUT` / `BEDROCK_READ_TIMEOUT` | `3` / `8` | Per-call ceiling (seconds) on every Bedrock client the providers build. Sized for Lambda's 30 s timeout; botocore's own default read timeout is 60 s, which lets one hung call consume the whole budget |
+| `BEDROCK_MAX_ATTEMPTS` | `2` | Attempts per Bedrock call, under botocore's `standard` retry mode. Deliberately below botocore's default of 5: five attempts cannot fit inside 30 s, so bounding the call means retrying less. Raise it (and lower the read timeout) if throttling matters more than the tight ceiling |
 | `SIMILARITY_THRESHOLD` | `0.6` | Below this best score, the assistant declines instead of generating |
 | `SIMILARITY_TOP_K` | `5` | Chunks requested from the vector store |
 | `INCLUDE_DEBUG_CONTEXT` | `false` | Adds `debug_context` (chunks + scores) to `/chat` responses |
@@ -313,8 +315,11 @@ curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" -d
 
 1. **Lambda → Create function → Container image**, selecting the image pushed above.
 2. Handler is baked into the image (`app.main.handler`); no override needed.
-3. **Memory** 1024 MB or more and **timeout** 30 s — the RAG path makes two Bedrock calls plus a
-   database query, and the dependencies are heavy on cold start.
+3. **Memory** 1024 MB or more and **timeout** 30 s — the RAG path makes up to three Bedrock calls
+   (scope classifier, embedding, answer: `chat.py:34`, `:39`, `:51`) plus a database query, and the
+   dependencies are heavy on cold start. That count is what the `BEDROCK_*` call ceiling is sized
+   against: each call is bounded at ~22 s, so this 30 s timeout remains the backstop for the
+   pathological case where several slow calls stack up in one request.
 4. **VPC**: attach the Lambda to the same VPC/private subnets as Aurora, with a security group the
    database accepts. Reaching Bedrock and S3 from private subnets needs either a NAT gateway or
    VPC endpoints (`com.amazonaws.<region>.bedrock-runtime` and an S3 gateway endpoint) — VPC

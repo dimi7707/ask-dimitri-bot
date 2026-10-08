@@ -26,6 +26,14 @@ class PgVectorStoreProvider:
             max_overflow=max_overflow,
         )
 
+    def close(self) -> None:
+        """Dispose the engine, releasing its pooled connections now instead of at GC time.
+
+        This is the `Closeable` half of the provider's lifecycle: the cache calls it before dropping
+        the provider, which is the only moment a replaced pool can be released deterministically.
+        """
+        self._engine.dispose()
+
     @contextmanager
     def _session(self):
         with Session(self._engine) as session:

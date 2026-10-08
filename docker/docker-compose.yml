@@ -60,6 +60,11 @@ services:
       # queue behind pool_timeout waiting for the single connection.
       DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      # Ceiling on a single Bedrock call. The defaults (3/8/2) are sized for Lambda's 30 s timeout,
+      # which does not bind here — raise them if a slow model makes uvicorn surface timeouts.
+      BEDROCK_CONNECT_TIMEOUT: ${BEDROCK_CONNECT_TIMEOUT:-3}
+      BEDROCK_READ_TIMEOUT: ${BEDROCK_READ_TIMEOUT:-8}
+      BEDROCK_MAX_ATTEMPTS: ${BEDROCK_MAX_ATTEMPTS:-2}
       # Bedrock has no local emulation, so these must be real credentials for /chat to answer.
       # Everything else (health, storage, vector store) works without them.
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}

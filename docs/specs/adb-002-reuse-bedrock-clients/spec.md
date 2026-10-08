@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Ticket** | [ticket.md](./ticket.md) (adb-002, detected at `eb18bb9`) |
 | **Type** | bug |
 | **Priority** | High, **not** deployment-blocking — revised down from the ticket's 🔴 critical; see OQ-6 |
@@ -104,7 +104,8 @@ exhausting a quota, but it is connection churn, not merely object churn.
 
 > **A note on naming.** Several criteria below name Python symbols
 > (`get_embedder`, `app.dependency_overrides`). That is a deliberate continuation of
-> the precedent in `openspec/specs/provider-lifecycle/spec.md:10-13`, which phrases the
+> the precedent in `openspec/specs/provider-lifecycle/spec.md`'s *Requirement: Vector store provider is
+> created once per process*, which phrases the
 > same capability over "the `get_vector_store` API dependency". The observable behavior
 > in every case is *what a second request gets*; the symbol names the seam where it is
 > observable in this codebase.
@@ -154,8 +155,20 @@ exhausting a quota, but it is connection churn, not merely object churn.
   defaulting to **3 s**, **8 s**, and **2 attempts** — so one unresponsive Bedrock call
   cannot consume more than ~22 s of the Lambda's 30 s budget. This applies to the
   embedding provider's client and to **both** clients `ChatBedrock` creates (see OQ-3).
-  The retry mode is part of the contract: `max_attempts` without `standard` mode leaves
+  The retry mode is part of the contract: an attempt count without `standard` mode leaves
   legacy backoff semantics in place and changes what the arithmetic means.
+
+  **"2 attempts" means two calls, and the implementation corrects the key this spec and
+  `plan.md` originally named.** botocore has two retry keys that differ by exactly one:
+  `max_attempts` in a client `Config` counts retries *after* the initial request, so a `2`
+  there permits **three** calls (~33 s) and overshoots the 30 s budget — the same defect
+  OQ-3 rejected in the ticket's own proposal. `total_max_attempts` includes the initial
+  request, and botocore's documentation prefers it for that reason
+  (`botocore/config.py:147-161`; the `+ 1` is at `botocore/args.py:620`). The shipped code
+  therefore passes `retries={"mode": "standard", "total_max_attempts": …}` and
+  `tests/integrations/{embeddings,generation}/test_bedrock_provider.py` assert the key,
+  because the wrong one validates silently. Verified on a real client: `connect_timeout 3.0`,
+  `read_timeout 8.0`, `total_max_attempts 2` — ~22 s worst case, as stated above.
 
   *Not marked `(invariant)`.* An invariant needs one chokepoint, and this has two — the
   two provider constructors. The repo's own rule says an invariant enforced in two
@@ -187,6 +200,17 @@ exhausting a quota, but it is connection churn, not merely object churn.
   the gate rather than by declaring. A stateless provider declares `close()` as a no-op
   — the ceremony is the point, because it is what makes the omission visible.
 
+  **Recorded limitation, in the same spirit as AC-9's.** "Every provider" is enforced over
+  an enumeration the gate holds **by hand**: nothing links a dependency in `deps` to the
+  registry it resolves from, because the registry callables are keyed by a settings string
+  rather than by the dependency. So `CACHED_PROVIDER_REGISTRIES` in
+  `tests/integrations/test_registry.py` is written, not derived.
+  `test_the_release_gate_covers_every_cached_dependency` asserts its size against
+  `deps._CACHED_PROVIDER_DEPENDENCIES`, which catches the realistic mistake — adding a
+  cached dependency and forgetting the registry — but a swap of one registry for another
+  would still pass. The word *invariant* above therefore claims a single chokepoint for the
+  `close()` **requirement**, not for the enumeration the requirement ranges over.
+
 ## Open questions
 
 All raised by the blindspot pass and resolved with the requester before planning.
@@ -209,11 +233,11 @@ instead of sniffing `_engine`.
 them would make `isinstance` fail for every double that is explicitly protocol-checked
 — `tests/integrations/embeddings/test_factory.py:14`,
 `generation/test_factory.py:14`, `vector_store/test_factory.py:32`, and
-`tests/api/test_deps.py:51` — until each grows a method that releases nothing. A
+`tests/api/test_deps.py::test_engine_holding_vector_store_satisfies_the_protocol` — until each grows a method that releases nothing. A
 separate protocol leaves all four valid.
 
 **One fake does change, and not for protocol reasons.** `EngineHoldingVectorStore`
-(`tests/api/test_deps.py:34-47`) extends `FakeVectorStore` (`tests/api/fakes.py:23`),
+(`EngineHoldingVectorStore` in `tests/api/test_deps.py`) extends `FakeVectorStore` (`tests/api/fakes.py:23`),
 which has **no** `close()` — verified: `isinstance(FakeVectorStore(), Closeable)` is
 `False`. Since the release path keys on `Closeable`, that double must gain a `close()`
 that disposes its engine, or `reset_vector_store()` would silently skip the dispose and
@@ -230,10 +254,10 @@ because AC-13 exists — not because `Closeable` exists. Drives AC-11, AC-13.
 
 ### OQ-2 — What is the reset surface for the two new caches? — **Closed**
 
-`tests/api/conftest.py:20` resets only the vector store, because it was the only cached
-dependency. Two more caches make that fixture incomplete, and the `fresh_settings`
-fixture at `tests/api/test_deps.py:180` would leave providers built from the *old*
-`Settings` in place.
+The autouse fixture in `tests/api/conftest.py` reset only the vector store, because it was
+the only cached dependency. Two more caches make that fixture incomplete, and the
+`fresh_settings` fixture in `tests/api/test_deps.py` would leave providers built from the
+*old* `Settings` in place.
 
 **Decision: one `reset_providers()` in `deps.py`** that walks all three caches, closes
 whatever is `Closeable`, and clears each entry in a `finally`. The autouse fixture in
@@ -254,8 +278,9 @@ does not fit the runtime it cites: `read_timeout=25` with
 **30 s** Lambda budget. A ceiling above the enclosing timeout is not a ceiling.
 
 **Decision: in scope, on every Bedrock client this code constructs**, with
-`connect_timeout=3, read_timeout=8, retries={"mode": "standard", "max_attempts": 2}` —
-~22 s worst case per call, inside the 30 s budget.
+`connect_timeout=3, read_timeout=8, retries={"mode": "standard", "total_max_attempts": 2}` —
+~22 s worst case per call, inside the 30 s budget. (Written here as `max_attempts` before
+implementation; see AC-9's correction for why that key would have meant three calls.)
 
 *Rationale:* botocore's default read timeout is 60 s, so today a single hung call
 consumes the whole Lambda; any correct ceiling is strictly better, and the constructor
@@ -346,12 +371,17 @@ requirements covering the embedding and generation providers, the `Closeable` co
 and the Bedrock ceiling. The `spec.md` / `plan.md` / `tasks.md` for this change live in
 `docs/specs/` as requested; `openspec/specs/` remains the capability-level contract.
 
-**Also correct, do not duplicate.** That capability spec currently asserts a scenario
-the code does not satisfy: "the provider reflects the supplied settings rather than the
-process-wide settings" (`openspec/specs/provider-lifecycle/spec.md:52-55`). The
-`_build_*_provider()` callables in the registries take no arguments and read
-`get_settings()` directly, so an explicit `Settings` selects the *registry key* only.
-That scenario must be narrowed, not copied onto the sibling providers.
+**Also correct, do not duplicate.** That capability spec asserted a scenario the code does
+not satisfy: "the provider reflects the supplied settings rather than the process-wide
+settings", under `openspec/specs/provider-lifecycle/spec.md`'s *Scenario: Factory called
+with explicit settings succeeds*. The `_build_*_provider()` callables in the registries
+take no arguments and read `get_settings()` directly, so an explicit `Settings` selects the
+*registry key* only. That scenario must be narrowed, not copied onto the sibling providers.
+
+*As shipped:* narrowed there, with the real behavior stated beside it under *Scenario:
+Configuration comes from the process-wide settings, not the supplied instance*. Cited by
+heading rather than by line range, because this change rewrote that file and a range would
+already be stale.
 
 *Rationale:* leaving it untouched would park an active document that states something
 false about the system. Migrating the capability into `docs/` entirely is the coherent
