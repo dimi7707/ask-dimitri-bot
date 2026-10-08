@@ -9,6 +9,10 @@ retired `adb-001` task 5.7.
 
 ## 1. Baseline
 
+> Already measured while writing this spec, on `origin/main` (`410e39c`). The boxes stay
+> unticked because they belong to the implementing PR's record, not this docs-only one —
+> the numbers below are the values to re-confirm against, not work still to do.
+
 - [ ] 1.1 Record the suite baseline. Measured on `origin/main` (`410e39c`):
       **124 passed, 8 skipped** (132 collected) — unchanged since `adb-001`
 - [ ] 1.2 Reproduce the defect. Measured on `410e39c`: `get_embedding_provider()`
@@ -39,37 +43,44 @@ retired `adb-001` task 5.7.
       (`client` and `bedrock_client`, verified present in langchain-aws 1.7.3) if a
       chat model was built, then drops the reference — **AC-11**
 - [ ] 2.5 Re-express `reset_vector_store()` as `_release(get_vector_store)`, off
-      `getattr(provider, "_engine", None)`, and confirm the three `adb-001` reset tests
-      in `tests/api/test_deps.py` pass **unmodified** — including the one asserting a
-      failed dispose still propagates
-- [ ] 2.6 Point the autouse fixture in `tests/api/conftest.py` at `reset_providers()`,
+      `getattr(provider, "_engine", None)`
+- [ ] 2.6 Give `EngineHoldingVectorStore` (`tests/api/test_deps.py:34-47`) a `close()`
+      that disposes its engine. **Required, not cosmetic:** it extends `FakeVectorStore`,
+      which has no `close()`, so `isinstance(..., Closeable)` is `False` (verified) and
+      two of the three `adb-001` reset tests would fail — `:216-225` on
+      `disposals == [True]`, and `:241-255` with DID NOT RAISE. Do **not** repair that by
+      restoring the `getattr` sniff alongside the `isinstance` check; that reinstates the
+      coupling this group removes. The empty-cache test at `:228-238` is unaffected
+- [ ] 2.7 Point the autouse fixture in `tests/api/conftest.py` at `reset_providers()`,
       still clearing on the way in as well as out — **AC-7**
-- [ ] 2.7 Make `fresh_settings` (`tests/api/test_deps.py:180`) reset providers too, so a
+- [ ] 2.8 Make `fresh_settings` (`tests/api/test_deps.py:180`) reset providers too, so a
       provider built from the previous `Settings` cannot survive the fixture — **AC-7**
-- [ ] 2.8 Leave both factories uncached and comment why (`Settings` is unhashable, so
+- [ ] 2.9 Leave both factories uncached and comment why (`Settings` is unhashable, so
       `lru_cache` there raises `TypeError`) — **AC-6**
-- [ ] 2.9 Confirm `tests/integrations/embeddings/test_factory.py` and
+- [ ] 2.10 Confirm `tests/integrations/embeddings/test_factory.py` and
       `tests/integrations/generation/test_factory.py` pass **unmodified**, especially
       the cases passing an explicit `Settings` — **AC-6**
-- [ ] 2.10 Add a closeable double to `tests/api/fakes.py` that records `close()` calls,
+- [ ] 2.11 Add a closeable double to `tests/api/fakes.py` that records `close()` calls,
       and one whose `close()` raises
-- [ ] 2.11 Add identity tests for both dependencies: `a is b`, **plus** a build counter
+- [ ] 2.12 Add identity tests for both dependencies: `a is b`, **plus** a build counter
       asserting the factory ran exactly once — identity alone passes vacuously if
       something memoizes a layer down — **AC-1, AC-2**
-- [ ] 2.12 Add a test that two consecutive `POST /chat` requests see the identical
-      embedding provider, recorded from **inside** `embed()`, **and** that exactly one
-      `boto3.client` was constructed across both — identity implies client identity
-      only because the client is built eagerly, which is an implementation fact, not a
-      tested one — **AC-3**
-- [ ] 2.13 Add a test that two consecutive `POST /chat` requests see the identical chat
+- [ ] 2.13 Add a test that two consecutive `POST /chat` requests see the identical
+      embedding provider, recorded from **inside** `embed()`, **and** that the embedding
+      provider constructed exactly one `boto3.client` across both — identity implies
+      client identity only because the client is built eagerly, which is an
+      implementation fact, not a tested one. Scope the counter to
+      `embeddings.bedrock_provider.boto3`; the generation path builds two more
+      clients — **AC-3**
+- [ ] 2.14 Add a test that two consecutive `POST /chat` requests see the identical chat
       model, recorded from **inside** the generation call. Install the double by
       patching `generation.bedrock_provider.ChatBedrock`, **not** by passing
       `chat_model=` — the constructor seam skips `_get_chat_model()`'s lazy branch and
       would leave AC-4's actual claim unproven — **AC-4**
-- [ ] 2.14 Test that releasing closes each provider before dropping it, that **all
+- [ ] 2.15 Test that releasing closes each provider before dropping it, that **all
       three** caches end empty when one `close()` raises, and that the failure reaches
       the caller — **AC-11**
-- [ ] 2.15 Test that releasing an empty cache constructs nothing, by making the factory
+- [ ] 2.16 Test that releasing an empty cache constructs nothing, by making the factory
       raise if called — a post-condition on `currsize` would pass
       unconditionally — **AC-12**
 
@@ -89,7 +100,10 @@ retired `adb-001` task 5.7.
       release would skip it silently and abandon its resource
 - [ ] 3.3 Record in the test's docstring that this proves *declaration*, not
       *diligence* — a no-op `close()` still passes, and that is the limit of a
-      structural check
+      structural check. Also record that the gate is unconditional **by design**: a
+      future stateless provider declares `close()` as a no-op rather than being
+      excluded, because a gate that decided for itself which providers own something
+      releasable would be narrowed into uselessness the first time it over-fired
 
 ## 4. Bound the Bedrock calls — **AC-9, AC-10**
 
@@ -98,7 +112,15 @@ retired `adb-001` task 5.7.
       `app/core/config.py`. The bounds matter: botocore reads a `connect_timeout` of
       `0`/`None` as *no timeout*, the inverse of the intent — **AC-10**
 - [ ] 4.2 Build the `botocore.config.Config` inside
-      `embeddings/bedrock_provider.py` and pass it to `boto3.client` — **AC-9**
+      `embeddings/bedrock_provider.py` and pass it to `boto3.client`. Include
+      `"mode": "standard"` explicitly — `max_attempts` alone validates fine and leaves
+      botocore's `legacy` backoff semantics in place, which is not what AC-9's
+      arithmetic assumes — **AC-9**
+- [ ] 4.2b Make the three values **required** parameters on both provider
+      constructors, so the defaults exist only in `Settings` and cannot drift. This
+      changes both signatures: update the direct constructions in
+      `tests/integrations/embeddings/test_bedrock_provider.py:26-28` and
+      `generation/test_bedrock_provider.py:31-33`
 - [ ] 4.3 Pass a `Config` to `ChatBedrock(config=...)` in
       `generation/bedrock_provider.py`, and confirm it reaches **both** clients
       `ChatBedrock` builds (`langchain_aws/llms/bedrock.py:948`, `:976`) — **AC-9**
@@ -120,7 +142,7 @@ retired `adb-001` task 5.7.
       environment table — `adb-001` landed its pool vars in all three places, and these
       are the two surfaces a human reads to discover configuration — **AC-10**
 
-## 5. Verify nothing else regressed — **AC-5, AC-8**
+## 5. Verify nothing else regressed — **AC-5, AC-7, AC-8**
 
 - [ ] 5.1 Confirm the `/chat` tests injecting fakes via `app.dependency_overrides`
       still work, and add the explicit test: with an override registered, the fake
@@ -137,9 +159,13 @@ retired `adb-001` task 5.7.
 - [ ] 5.4 Confirm the architecture test still passes otherwise: the new
       `botocore.config` imports are inside `*_provider.py`, and `lifecycle.py` imports
       only `typing`
-- [ ] 5.5 Add an assertion that every entry of `_CACHED_PROVIDER_DEPENDENCIES` reports
-      `currsize == 0` after the autouse fixture runs, so a fourth cached dependency
-      added without being registered fails instead of contaminating silently — **AC-7**
+- [ ] 5.5 Add **two** assertions, because one of them only looks like it covers the
+      other: (a) every entry of `_CACHED_PROVIDER_DEPENDENCIES` reports
+      `currsize == 0` after the autouse fixture runs; and (b) the set of
+      `functools.lru_cache`-wrapped callables in the `deps` module **equals**
+      `_CACHED_PROVIDER_DEPENDENCIES`. Only (b) catches a fourth cached dependency
+      nobody registered — iterating the tuple can never notice something missing from
+      the tuple, which is the failure this task exists for — **AC-7**
 - [ ] 5.6 Verify each new test fails against the unfixed code — remove the decorators
       and the `Config` and confirm the expected failures — so they guard the regression
       instead of passing vacuously
@@ -184,16 +210,16 @@ capability spec updated and corrected.
 
 | AC | Task | Test that proves it |
 |---|---|---|
-| AC-1 embedder once per process | 2.2, 2.11 | `test_deps.py` — identity + factory build counter |
-| AC-2 generator once per process | 2.2, 2.11 | `test_deps.py` — identity + factory build counter |
-| AC-3 two requests, one embedder and one client | 2.12 | `test_deps.py` — identity inside `embed()` + `boto3.client` construction counter |
-| AC-4 two requests, one chat model | 2.13 | `test_deps.py` — identity inside the generation call, double patched at the module symbol |
-| AC-5 override beats the cache | 5.1 | `test_deps.py` — fake served it, no real client built |
-| AC-6 factories uncached | 2.8, 2.9 | existing `test_factory.py` modules, unmodified |
-| AC-7 no cross-test contamination | 2.6, 2.7, 5.5 | `conftest.py` fixture + the `currsize == 0` registration assertion in 5.5 |
+| AC-1 embedder once per process (sequential) | 2.2, 2.12 | `test_deps.py` — identity + factory build counter |
+| AC-2 generator once per process (sequential) | 2.2, 2.12 | `test_deps.py` — identity + factory build counter |
+| AC-3 two requests, one embedder and one embedding client | 2.13 | `test_deps.py` — identity inside `embed()` + a `boto3.client` counter scoped to `embeddings.bedrock_provider` |
+| AC-4 two requests, one chat model | 2.14 | `test_deps.py` — identity inside the generation call, double patched at the module symbol |
+| AC-5 override beats the cache, per dependency | 5.1 | `test_deps.py` — fake served it, no real client built for that dependency |
+| AC-6 factories uncached | 2.9, 2.10 | existing `test_factory.py` modules, unmodified |
+| AC-7 no cross-test contamination | 2.7, 2.8, 5.5 | `conftest.py` fixture + both assertions in 5.5 — the set-equality one is what actually catches an unregistered cache |
 | AC-8 ingestion does not use the API deps | 5.3 | `tests/architecture/test_integration_boundaries.py` — new import rule |
-| AC-9 every Bedrock client bounded | 4.2–4.6, 3.1 | `test_bedrock_provider.py` (both) for the values; `test_registry.py` for the universal |
+| AC-9 the two providers' clients are bounded | 4.1–4.6 | `test_bedrock_provider.py` (both) — captured kwargs incl. `standard` mode; one env-var path end to end. **Behavioral, not an invariant** — a third Bedrock client is not prevented; see AC-9's note |
 | AC-10 ceiling-removing values rejected | 4.1, 4.7 | `tests/core/test_config.py` — `ValidationError` cases |
-| AC-11 release closes, always clears, never silent | 2.3, 2.4, 2.14 | `test_deps.py` — raising `close()`, all caches empty, failure reaches the caller |
-| AC-12 empty release builds nothing | 2.15 | `test_deps.py` — factory raises if called |
+| AC-11 release closes, always clears, never silent | 2.3, 2.4, 2.6, 2.15 | `test_deps.py` — raising `close()`, all caches empty, failure reaches the caller |
+| AC-12 empty release builds nothing | 2.16 | `test_deps.py` — factory raises if called |
 | AC-13 every provider declares its release contract | 3.1–3.3 | `tests/integrations/test_registry.py` — parameterized over the `PROVIDERS` dicts |

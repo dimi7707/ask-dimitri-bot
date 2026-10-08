@@ -152,9 +152,28 @@ re-raised as itself, so `adb-001`'s
 `pytest.raises(RuntimeError)` — keeps passing unmodified; multiple failures are raised
 as an `ExceptionGroup` (Python 3.12, which this project targets).
 
-`reset_vector_store()` is kept and re-expressed over `_release`, so the `adb-001` tests
-calling it by name pass unmodified. Its behavior is unchanged: disposal via
-`PgVectorStoreProvider.close()` instead of the `getattr` sniff.
+`reset_vector_store()` is kept and re-expressed over `_release`. Its behavior is
+unchanged for real providers: disposal via `PgVectorStoreProvider.close()` instead of
+the `getattr` sniff.
+
+**Two `adb-001` reset tests need a one-line change to their double, and the spec says
+so rather than promising they are untouched.** The reset tests do not exercise
+`PgVectorStoreProvider`; they use `EngineHoldingVectorStore`
+(`tests/api/test_deps.py:34-47`), which extends `FakeVectorStore`
+(`tests/api/fakes.py:23`) and holds an `_engine` but declares no `close()` — verified:
+`isinstance(FakeVectorStore(), Closeable)` is `False`. Keying the release on `Closeable`
+would therefore skip the dispose for that double, so
+`test_reset_vector_store_disposes_the_engine_before_dropping_the_provider` (`:216-225`)
+would fail on `disposals == [True]` and
+`test_reset_vector_store_clears_the_cache_even_if_dispose_fails` (`:241-255`) would fail
+with DID NOT RAISE. The fix is to give `EngineHoldingVectorStore` a `close()` that
+disposes its engine — which is what the production provider does, so the double becomes
+*more* faithful, not less. The third reset test (`:228-238`, the empty-cache case) is
+genuinely unaffected.
+
+This is called out loudly because the tempting repair when those two go red is to put
+the `getattr(provider, "_engine", None)` sniff back alongside the `isinstance` check,
+which reinstates exactly the coupling OQ-1 exists to remove.
 
 ### Bedrock timeouts in `Settings`, applied to every client, at the cost of retries
 
@@ -168,7 +187,21 @@ config=Config(
 ```
 
 Three new `Settings` fields — `bedrock_connect_timeout` (`gt=0`),
-`bedrock_read_timeout` (`gt=0`), `bedrock_max_attempts` (`ge=1`).
+`bedrock_read_timeout` (`gt=0`), `bedrock_max_attempts` (`ge=1`). The retry **mode** is
+a literal `"standard"` in the provider, not a fourth setting: it is the semantics the
+attempt count is expressed in, not a per-runtime tunable, and `max_attempts` without it
+silently keeps legacy backoff.
+
+**The defaults live in `Settings` only.** The three provider parameters are
+**required**, not defaulted, so 3 / 8 / 2 are written in exactly one place and cannot
+drift. That makes the provider constructors' signatures change, which the existing
+provider tests construct directly
+(`tests/integrations/embeddings/test_bedrock_provider.py:26-28`,
+`generation/test_bedrock_provider.py:31-33`) — so those two files must be updated, and
+they are listed in *Affected layers* and in `tasks.md` rather than discovered at
+implementation time. Defaulting them on the provider instead would duplicate the
+numbers and let a `Settings` default and a provider default disagree, with only one of
+the three covered by the end-to-end task.
 
 **Which `Settings` instance feeds them.** The process-wide one, via `get_settings()`
 inside each `_build_bedrock_provider()`. This is explicit because the alternative is a
@@ -228,10 +261,13 @@ The timeout configuration is asserted by capturing the kwargs the provider passe
 `boto3.client` / `ChatBedrock`, not by reading botocore internals off the built client —
 same rationale as `adb-001`'s `create_engine` capture: an upstream rename should produce
 a meaningful failure, not an `AttributeError`. The residual: `ChatBedrock` also exposes
-its own `read_timeout` / `connect_timeout` fields that **merge over** `config`
-(`langchain_aws/llms/bedrock.py:765-773`), so a later change setting those would satisfy
-the capture while altering the effective ceiling. Accepted — asserting the built
-client's private config trades one blind spot for a more brittle one.
+its own **`timeout`** and **`max_retries`** fields (`langchain_aws/llms/bedrock.py:766`,
+`:771` — verified; there are no `read_timeout`/`connect_timeout` fields), which
+`_get_effective_config()` (`:908-927`) **merges over** `config`. So a later change
+setting `timeout` or `max_retries` would satisfy the kwargs capture while moving the
+effective ceiling — and `max_retries` moves the *attempt count* AC-9 bounds, not just
+the timeouts. Accepted — asserting the built client's private config trades one blind
+spot for a more brittle one.
 
 ## Affected layers
 
@@ -249,10 +285,10 @@ Nothing here inverts that.
 | core | `app/core/config.py` | three bounded `Settings` fields |
 | api | `app/api/deps.py` | `@lru_cache` on both dependencies; `reset_providers()`; `reset_vector_store()` over `_release`; module docstring updated (it currently explains the cache in terms of "a provider that owns connections") |
 | tests | `tests/api/conftest.py` | autouse fixture calls `reset_providers()` |
-| tests | `tests/api/test_deps.py` | new reuse/release tests; `fresh_settings` also resets providers |
+| tests | `tests/api/test_deps.py` | new reuse/release tests; `fresh_settings` also resets providers; `EngineHoldingVectorStore` gains `close()` so the `adb-001` reset tests still exercise the dispose |
 | tests | `tests/api/fakes.py` | a closeable double recording `close()`, and one whose `close()` raises |
-| tests | `tests/integrations/embeddings/test_bedrock_provider.py` | captured-kwargs assertions for the `Config`; `close()` behavior |
-| tests | `tests/integrations/generation/test_bedrock_provider.py` | captured-kwargs assertions; `close()` closes both clients |
+| tests | `tests/integrations/embeddings/test_bedrock_provider.py` | captured-kwargs assertions for the `Config`; `close()` behavior; **constructor calls updated** for the three now-required parameters |
+| tests | `tests/integrations/generation/test_bedrock_provider.py` | captured-kwargs assertions; `close()` closes both clients; **constructor calls updated** likewise |
 | tests | `tests/integrations/test_registry.py` | AC-13: every registered provider declares `Closeable` |
 | tests | `tests/core/test_config.py` | `ValidationError` for ceiling-removing values |
 | tests | `tests/architecture/test_integration_boundaries.py` | AC-8: `ingestion/` must not import `app.api.deps` |
@@ -268,13 +304,15 @@ Nothing here inverts that.
 | AC-1 | Embedding provider built at most once per process, absent an override or a release | `@lru_cache` on `deps.get_embedder` — the single resolution path for the route | `tests/api/test_deps.py` — identity across two calls **plus** a build counter asserting the factory ran once |
 | AC-2 | Generation provider built at most once per process, same conditions | `@lru_cache` on `deps.get_generator` | same shape as AC-1 |
 | AC-5 | A registered override always wins over the cache | FastAPI's own override resolution, which runs before the dependency is called | `tests/api/test_deps.py` — override registered, `/chat` issued, fake recorded the call and no real client was constructed |
-| AC-9 | Every Bedrock client this code builds carries a bounded ceiling | **The registry assertion in `tests/integrations/test_registry.py`**, parameterized over every entry of the three `PROVIDERS` dicts — *not* the two construction sites, which are two places and therefore no place | `tests/integrations/{embeddings,generation}/test_bedrock_provider.py` for the values at each site; the registry test for the universal, so a third Bedrock provider cannot land unbounded |
 | AC-10 | A ceiling-removing value is rejected, not accepted | `Settings` field constraints (`gt=0`, `ge=1`) — validation happens before any provider is built | `tests/core/test_config.py` — `ValidationError` for `0`/negative timeout and `0` attempts |
 | AC-11 | A release never leaves a populated cache behind, and never fails silently | `_release`'s `finally`, plus `reset_providers()` collecting failures across the loop and raising them | `tests/api/test_deps.py` — a double whose `close()` raises; assert all three caches empty and the error surfaces |
 | AC-13 | Every provider behind a cached dependency declares its release contract | The three `PROVIDERS` registries are the single enumerable list of providers that exist | `tests/integrations/test_registry.py` — parameterized `isinstance(..., Closeable)` over every registered provider |
 
-AC-3, AC-4, AC-6, AC-7, AC-8 and AC-12 are behavioral rather than invariants; their
-tests are listed in `tasks.md`.
+AC-3, AC-4, AC-6, AC-7, AC-8, AC-9 and AC-12 are behavioral rather than invariants;
+their tests are listed in `tasks.md`. **AC-9 is deliberately in that list**: its two
+construction sites are two chokepoints, the repo's rule rejects that as enforcement,
+and the architecture test forbids collapsing them into one module. AC-9's own note in
+`spec.md` records the consequence — a third Bedrock client can land unbounded.
 
 ## Gates this change adds
 
@@ -322,6 +360,14 @@ tests are listed in `tasks.md`.
 - **A failed `ChatBedrock` construction is retried per request** → **accepted**
   (OQ-4). AC-4 is scoped to the success path. On a credential-less machine the ~90 s
   block still repeats; fast-failing it needs A1's error handling to be meaningful.
+- **The ingestion batch job inherits the ceiling it was not sized for** → the `Config`
+  lands in `_build_bedrock_provider()`, the same factory `ingestion/ingest.py:130`
+  calls, so the batch job also moves to 8 s / 2 attempts. **Accepted**: each ingestion
+  call is a single short `embed()` of one chunk, for which 8 s is generous. The real
+  exposure is the retry budget over a long run — a transient throttle now fails a chunk
+  after two attempts instead of five. If a large ingest starts failing, the fix is
+  ingestion-specific values, not reverting the ceiling. Recorded in `spec.md`'s
+  *Non-goals* so the behavior change on a declared-out-of-scope path is stated.
 - **Fewer retries against a throttle-prone endpoint** → **accepted deliberately**, and
   recorded in `spec.md`'s *Non-goals*: 2 attempts instead of botocore's default 5 is
   what buys a ceiling inside 30 s. If `/chat` starts surfacing `ThrottlingException`,
