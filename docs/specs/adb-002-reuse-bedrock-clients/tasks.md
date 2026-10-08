@@ -52,16 +52,19 @@ retired `adb-001` task 5.7.
       chat model was built, then drops the reference — **AC-11**
 - [x] 2.5 Re-express `reset_vector_store()` as `_release(get_vector_store)`, off
       `getattr(provider, "_engine", None)`
-- [x] 2.6 Give `EngineHoldingVectorStore` (`tests/api/test_deps.py:34-47`) a `close()`
+- [x] 2.6 Give `EngineHoldingVectorStore` (in `tests/api/test_deps.py`) a `close()`
       that disposes its engine. **Required, not cosmetic:** it extends `FakeVectorStore`,
       which has no `close()`, so `isinstance(..., Closeable)` is `False` (verified) and
-      two of the three `adb-001` reset tests would fail — `:216-225` on
-      `disposals == [True]`, and `:241-255` with DID NOT RAISE. Do **not** repair that by
+      two of the three `adb-001` reset tests would fail —
+      `test_reset_vector_store_disposes_the_engine_before_dropping_the_provider` on
+      `disposals == [True]`, and `test_reset_vector_store_clears_the_cache_even_if_dispose_fails`
+      with DID NOT RAISE. Do **not** repair that by
       restoring the `getattr` sniff alongside the `isinstance` check; that reinstates the
-      coupling this group removes. The empty-cache test at `:228-238` is unaffected
+      coupling this group removes. The empty-cache test
+      (`test_reset_vector_store_builds_nothing_when_nothing_is_cached`) is unaffected
 - [x] 2.7 Point the autouse fixture in `tests/api/conftest.py` at `reset_providers()`,
       still clearing on the way in as well as out — **AC-7**
-- [x] 2.8 Make `fresh_settings` (`tests/api/test_deps.py:180`) reset providers too, so a
+- [x] 2.8 Make the `fresh_settings` fixture in `tests/api/test_deps.py` reset providers too, so a
       provider built from the previous `Settings` cannot survive the fixture — **AC-7**
 - [x] 2.9 Leave both factories uncached and comment why (`Settings` is unhashable, so
       `lru_cache` there raises `TypeError`) — **AC-6**

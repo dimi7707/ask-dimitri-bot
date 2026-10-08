@@ -46,13 +46,30 @@ class BedrockGenerationProvider:
         without a chat model rather than holding a half-closed one. `getattr` guards the attribute
         names because they are upstream's: a rename should make this release less than it should,
         not raise `AttributeError` from inside a reset.
+
+        Both clients are closed even if one of them raises, for the same reason
+        `app.api.deps.reset_providers()` keeps going across providers: stopping at the first failure
+        would abandon the second client's pool permanently — the caller has already lost its
+        reference to the chat model by then, so nothing would ever retry. Failures are collected and
+        re-raised afterwards, a lone one as itself so a caller can still match on its type.
         """
         chat_model, self._chat_model = self._chat_model, None
         if chat_model is None:
             return
+
+        failures: list[Exception] = []
         for client in (getattr(chat_model, "client", None), getattr(chat_model, "bedrock_client", None)):
-            if client is not None:
+            if client is None:
+                continue
+            try:
                 client.close()
+            except Exception as error:
+                failures.append(error)
+
+        if len(failures) == 1:
+            raise failures[0]
+        if failures:
+            raise ExceptionGroup("closing the chat model's clients failed", failures)
 
     def generate(self, system_prompt: str, question: str, context: list[str]) -> str:
         message = self._get_chat_model().invoke(

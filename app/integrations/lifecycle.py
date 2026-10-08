@@ -21,6 +21,15 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class Closeable(Protocol):
-    """A provider that holds a resource worth releasing before the provider is discarded."""
+    """A provider that holds a resource worth releasing before the provider is discarded.
+
+    **A closed provider is spent: do not use it again.** `close()` is called by the cache on its
+    way to dropping the entry, so no later resolution can hand out a closed provider — which is
+    what makes this contract cheap to honor. Implementations are free to be more forgiving than
+    this (`BedrockGenerationProvider` drops its chat model and would rebuild one on next use,
+    because dropping that reference is part of its release), but callers may not rely on it: the
+    embedding provider's client stays closed, and a provider that reconnected silently would turn
+    a use-after-release bug into a new connection nobody asked for.
+    """
 
     def close(self) -> None: ...

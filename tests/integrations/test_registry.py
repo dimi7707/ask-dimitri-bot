@@ -1,5 +1,6 @@
 import pytest
 
+from app.api import deps
 from app.integrations._registry import resolve_provider
 from app.integrations.embeddings import factory as embeddings_factory
 from app.integrations.generation import factory as generation_factory
@@ -23,13 +24,31 @@ def test_resolve_provider_raises_on_unknown_provider_name():
 # The registries behind the three *cached* API dependencies. Storage and document processing are
 # absent on purpose: neither is an API dependency — both are reached only from `ingestion/`, which
 # builds its providers once at its entry point — so neither is ever held in a cache that has to
-# release it. The seam this leaves is that caching a fourth dependency means extending this dict as
-# well; `tests/api/test_deps.py` catches the half of that which is visible from `deps`.
+# release it.
 CACHED_PROVIDER_REGISTRIES = {
     "embedding": embeddings_factory.PROVIDERS,
     "generation": generation_factory.PROVIDERS,
     "vector store": vector_store_factory.PROVIDERS,
 }
+
+
+def test_the_release_gate_covers_every_cached_dependency():
+    """The tripwire for this dict going stale, which would hollow out the gate below silently.
+
+    Nothing links a dependency in `deps` to the registry it resolves from — the registry callables
+    are looked up by a settings string, not by the dependency — so this dict is written by hand. A
+    fourth cached dependency added to `deps._CACHED_PROVIDER_DEPENDENCIES` but not here would leave
+    `test_every_cached_dependency_in_deps_is_registered_for_release` green (it only checks the
+    release tuple) *and* this gate green, while the new provider's `close()` went unrequired.
+
+    Counting is the honest strength of a hand-written pairing: it catches the realistic mistake —
+    adding a cache and forgetting this dict — without claiming an identity mapping it cannot prove.
+    Swapping one registry for another would still slip through, which AC-13 records.
+    """
+    assert len(CACHED_PROVIDER_REGISTRIES) == len(deps._CACHED_PROVIDER_DEPENDENCIES), (
+        "the number of cached provider dependencies changed; add the new capability's PROVIDERS "
+        "registry to CACHED_PROVIDER_REGISTRIES so its providers are held to the release contract"
+    )
 
 
 def every_registered_provider():

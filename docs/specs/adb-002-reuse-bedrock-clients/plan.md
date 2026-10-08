@@ -82,7 +82,7 @@ ever built, then drops the reference.
 `GenerationProvider`?* They are `runtime_checkable`, so `isinstance` checks method
 presence — adding `close()` breaks the four doubles that are explicitly
 protocol-asserted (`tests/integrations/{embeddings,generation,vector_store}/test_factory.py`
-and `tests/api/test_deps.py:51`) until each grows a method that releases nothing. The
+and `tests/api/test_deps.py::test_engine_holding_vector_store_satisfies_the_protocol`) until each grows a method that releases nothing. The
 doubles in `tests/api/fakes.py` are satisfied structurally and never
 `isinstance`-checked, so they are unaffected either way. A separate protocol removes
 the `getattr(provider, "_engine", None)` coupling at zero churn to current fakes.
@@ -159,16 +159,16 @@ the `getattr` sniff.
 **Two `adb-001` reset tests need a one-line change to their double, and the spec says
 so rather than promising they are untouched.** The reset tests do not exercise
 `PgVectorStoreProvider`; they use `EngineHoldingVectorStore`
-(`tests/api/test_deps.py:34-47`), which extends `FakeVectorStore`
+(`EngineHoldingVectorStore` in `tests/api/test_deps.py`), which extends `FakeVectorStore`
 (`tests/api/fakes.py:23`) and holds an `_engine` but declares no `close()` — verified:
 `isinstance(FakeVectorStore(), Closeable)` is `False`. Keying the release on `Closeable`
 would therefore skip the dispose for that double, so
-`test_reset_vector_store_disposes_the_engine_before_dropping_the_provider` (`:216-225`)
+`test_reset_vector_store_disposes_the_engine_before_dropping_the_provider`
 would fail on `disposals == [True]` and
-`test_reset_vector_store_clears_the_cache_even_if_dispose_fails` (`:241-255`) would fail
+`test_reset_vector_store_clears_the_cache_even_if_dispose_fails` would fail
 with DID NOT RAISE. The fix is to give `EngineHoldingVectorStore` a `close()` that
 disposes its engine — which is what the production provider does, so the double becomes
-*more* faithful, not less. The third reset test (`:228-238`, the empty-cache case) is
+*more* faithful, not less. The third reset test (`test_reset_vector_store_builds_nothing_when_nothing_is_cached`) is
 genuinely unaffected.
 
 This is called out loudly because the tempting repair when those two go red is to put
@@ -220,7 +220,7 @@ plausible misreading: `_build_bedrock_provider()` takes **no parameters** today
 `get_embedding_provider` / `get_generation_provider` is used only to pick the registry
 key (`:22-24` in each). So an explicit `Settings` passed to the factory selects *which
 provider* is built, not *how it is configured* — exactly as `adb-001`'s pool settings
-behave, and why `tests/api/test_deps.py:199-211` monkeypatches
+behave, and why `test_factory_sizes_the_pool_from_settings` in `tests/api/test_deps.py` monkeypatches
 `vector_store_factory.get_settings` rather than passing settings in. **The registry
 callables do not gain a parameter in this change.** `openspec/specs/provider-lifecycle/spec.md:52-55`
 currently claims the opposite ("the provider reflects the supplied settings rather than

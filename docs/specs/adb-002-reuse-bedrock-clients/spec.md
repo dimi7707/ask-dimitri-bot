@@ -199,6 +199,17 @@ exhausting a quota, but it is connection churn, not merely object churn.
   the gate rather than by declaring. A stateless provider declares `close()` as a no-op
   — the ceremony is the point, because it is what makes the omission visible.
 
+  **Recorded limitation, in the same spirit as AC-9's.** "Every provider" is enforced over
+  an enumeration the gate holds **by hand**: nothing links a dependency in `deps` to the
+  registry it resolves from, because the registry callables are keyed by a settings string
+  rather than by the dependency. So `CACHED_PROVIDER_REGISTRIES` in
+  `tests/integrations/test_registry.py` is written, not derived.
+  `test_the_release_gate_covers_every_cached_dependency` asserts its size against
+  `deps._CACHED_PROVIDER_DEPENDENCIES`, which catches the realistic mistake — adding a
+  cached dependency and forgetting the registry — but a swap of one registry for another
+  would still pass. The word *invariant* above therefore claims a single chokepoint for the
+  `close()` **requirement**, not for the enumeration the requirement ranges over.
+
 ## Open questions
 
 All raised by the blindspot pass and resolved with the requester before planning.
@@ -221,11 +232,11 @@ instead of sniffing `_engine`.
 them would make `isinstance` fail for every double that is explicitly protocol-checked
 — `tests/integrations/embeddings/test_factory.py:14`,
 `generation/test_factory.py:14`, `vector_store/test_factory.py:32`, and
-`tests/api/test_deps.py:51` — until each grows a method that releases nothing. A
+`tests/api/test_deps.py::test_engine_holding_vector_store_satisfies_the_protocol` — until each grows a method that releases nothing. A
 separate protocol leaves all four valid.
 
 **One fake does change, and not for protocol reasons.** `EngineHoldingVectorStore`
-(`tests/api/test_deps.py:34-47`) extends `FakeVectorStore` (`tests/api/fakes.py:23`),
+(`EngineHoldingVectorStore` in `tests/api/test_deps.py`) extends `FakeVectorStore` (`tests/api/fakes.py:23`),
 which has **no** `close()` — verified: `isinstance(FakeVectorStore(), Closeable)` is
 `False`. Since the release path keys on `Closeable`, that double must gain a `close()`
 that disposes its engine, or `reset_vector_store()` would silently skip the dispose and
@@ -244,7 +255,7 @@ because AC-13 exists — not because `Closeable` exists. Drives AC-11, AC-13.
 
 `tests/api/conftest.py:20` resets only the vector store, because it was the only cached
 dependency. Two more caches make that fixture incomplete, and the `fresh_settings`
-fixture at `tests/api/test_deps.py:180` would leave providers built from the *old*
+fixture at the `fresh_settings` fixture in `tests/api/test_deps.py` would leave providers built from the *old*
 `Settings` in place.
 
 **Decision: one `reset_providers()` in `deps.py`** that walks all three caches, closes

@@ -15,11 +15,14 @@ CALL_CEILING = {"connect_timeout": 1, "read_timeout": 2, "max_attempts": 3}
 class FakeBedrockClient:
     """One of the two clients a `ChatBedrock` owns, recording its release."""
 
-    def __init__(self):
+    def __init__(self, fail_to_close: bool = False):
         self.closed = 0
+        self._fail_to_close = fail_to_close
 
     def close(self) -> None:
         self.closed += 1
+        if self._fail_to_close:
+            raise RuntimeError("socket refused to close")
 
 
 class FakeChatModel:
@@ -155,6 +158,33 @@ def test_generate_propagates_errors_from_bedrock():
 # --- adb-002 2.4 the provider releases both of the chat model's clients -------------------
 
 
+def test_close_closes_the_second_client_even_when_the_first_one_raises():
+    """Otherwise the control-plane pool is abandoned for good: `close()` has already dropped the
+    chat model, so the caller has no reference left to retry with. Same reasoning as
+    `deps.reset_providers()` collecting failures across providers instead of stopping at the first.
+    """
+    chat_model = FakeChatModel()
+    chat_model.client = FakeBedrockClient(fail_to_close=True)
+    provider = BedrockGenerationProvider(model_id="m", region="us-east-1", chat_model=chat_model, **CALL_CEILING)
+
+    with pytest.raises(RuntimeError, match="socket refused to close"):
+        provider.close()
+
+    assert chat_model.bedrock_client.closed == 1, "the second client's pool was abandoned"
+
+
+def test_close_reports_every_client_failure_not_just_the_first():
+    chat_model = FakeChatModel()
+    chat_model.client = FakeBedrockClient(fail_to_close=True)
+    chat_model.bedrock_client = FakeBedrockClient(fail_to_close=True)
+    provider = BedrockGenerationProvider(model_id="m", region="us-east-1", chat_model=chat_model, **CALL_CEILING)
+
+    with pytest.raises(ExceptionGroup) as raised:
+        provider.close()
+
+    assert len(raised.value.exceptions) == 2
+
+
 def test_close_closes_both_clients_the_chat_model_owns():
     """`ChatBedrock` builds two clients, each with its own connection pool, so closing only the
     runtime one would leave half the sockets held until the garbage collector finalized them."""
@@ -168,6 +198,10 @@ def test_close_closes_both_clients_the_chat_model_owns():
 
 
 def test_close_drops_the_chat_model_so_a_released_provider_holds_nothing(monkeypatch):
+    """Pins that the reference is *dropped*, which is the half of the release contract `Closeable`
+    requires. That a later `generate()` then rebuilds is a consequence, not a promise — `Closeable`
+    says a closed provider is spent, and the cache clears the entry so nobody gets a closed one.
+    """
     chat_model = FakeChatModel()
     provider = BedrockGenerationProvider(model_id="m", region="us-east-1", chat_model=chat_model, **CALL_CEILING)
 
