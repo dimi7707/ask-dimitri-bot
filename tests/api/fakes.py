@@ -53,5 +53,27 @@ class FakeGenerationProvider:
         return [call for call in self.calls if call["system_prompt"] == SYSTEM_PROMPT]
 
 
+class ClosingProvider:
+    """A cached provider whose only interesting behavior is recording that it was released.
+
+    It satisfies no capability protocol on purpose: the release path keys on `Closeable` alone, so a
+    double that implements nothing else is the narrowest thing that can prove the release happened.
+    """
+
+    def __init__(self):
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class FailingToCloseProvider(ClosingProvider):
+    """Releases badly — the case that decides whether a failed release still empties the caches."""
+
+    def close(self) -> None:
+        super().close()
+        raise RuntimeError("client refused to close")
+
+
 def chunk(text: str, score: float, document_id: str = "doc-1") -> RetrievedChunk:
     return RetrievedChunk(chunk_text=text, score=score, document_id=document_id)

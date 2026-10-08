@@ -20,5 +20,9 @@ PROVIDERS: dict[str, Callable[[], GenerationProvider]] = {
 
 
 def get_generation_provider(settings: Settings | None = None) -> GenerationProvider:
+    """Deliberately uncached: `Settings` is a Pydantic model and therefore unhashable, so
+    `@lru_cache` here would raise `TypeError` for every caller that passes settings explicitly.
+    Provider reuse is the responsibility of `app.api.deps.get_generator`, which takes no arguments.
+    """
     settings = settings or get_settings()
     return resolve_provider("generation", settings.llm_provider, PROVIDERS)

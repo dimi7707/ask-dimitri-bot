@@ -10,6 +10,25 @@ class BedrockGenerationProvider:
         self._region = region
         self._chat_model = chat_model
 
+    def close(self) -> None:
+        """Close both clients `ChatBedrock` owns, then drop it.
+
+        It builds two: `client` for `bedrock-runtime` and `bedrock_client` for the `bedrock` control
+        plane (langchain-aws 1.7.3, `llms/bedrock.py:948` and `:976`). Each owns its own connection
+        pool, so closing only the runtime one would leave half the sockets behind.
+
+        The reference is dropped first, so a client that refuses to close still leaves the provider
+        without a chat model rather than holding a half-closed one. `getattr` guards the attribute
+        names because they are upstream's: a rename should make this release less than it should,
+        not raise `AttributeError` from inside a reset.
+        """
+        chat_model, self._chat_model = self._chat_model, None
+        if chat_model is None:
+            return
+        for client in (getattr(chat_model, "client", None), getattr(chat_model, "bedrock_client", None)):
+            if client is not None:
+                client.close()
+
     def generate(self, system_prompt: str, question: str, context: list[str]) -> str:
         message = self._get_chat_model().invoke(
             [
