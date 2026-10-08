@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Proposed |
+| **Status** | Implemented |
 | **Ticket** | [ticket.md](./ticket.md) (adb-002, detected at `eb18bb9`) |
 | **Type** | bug |
 | **Priority** | High, **not** deployment-blocking — revised down from the ticket's 🔴 critical; see OQ-6 |

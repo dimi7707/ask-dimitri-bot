@@ -2,6 +2,31 @@
 > tracker, so this file is its system of record. Nothing below has been edited,
 > corrected, or re-scoped — corrections live in `spec.md` and `plan.md`.
 
+> **Closed — implemented.** Every acceptance criterion below is met; the boxes are left
+> unticked because this file is verbatim, so the record lives here instead:
+>
+> | Criterion (§ *Criterios de aceptación*) | Where it is proven |
+> |---|---|
+> | `get_embedder()` twice → same instance | `tests/api/test_deps.py::test_get_embedder_returns_the_same_provider_across_calls` |
+> | `get_generator()` twice → same instance | `…::test_get_generator_returns_the_same_provider_across_calls` |
+> | Two `POST /chat` reuse one `ChatBedrock` | `…::test_two_consecutive_chat_requests_share_one_chat_model` |
+> | `_get_chat_model()`'s comment is true — built once per process | same test, plus the rewritten docstring in `app/integrations/generation/bedrock_provider.py` |
+> | The two `test_factory.py` modules pass unmodified | unchanged in this PR; `git log -p` shows no edit to either |
+> | `app.dependency_overrides` still injects fakes in the `/chat` tests | `…::test_registered_override_wins_over_the_cached_embedder` and `…_generator`, plus all of `tests/api/test_chat.py` |
+> | Full suite green | 159 passed, 8 skipped (124 baseline + 35 new) |
+>
+> **Two things this ticket asserts that the implementation deliberately did not keep.**
+> *Priority:* labelled crítica / bloqueante para producción above; revised to **High, not
+> deployment-blocking** (`spec.md` OQ-6). Measured waste is ~10 ms per request on a path
+> spending hundreds of milliseconds per Bedrock call, and the ticket's own impact table
+> concedes it does not bring the service down. The fix is still worth shipping — the
+> argument is connection churn, not resource exhaustion.
+> *Retry budget:* the optional timeouts this ticket recommends are in scope, but tightened
+> and applied to **every** client rather than just the embedding one. That shrinks retries
+> from botocore's default 5 attempts to 2, because 5 cannot fit inside Lambda's 30 s
+> timeout. A throttled Bedrock call now surfaces after two attempts
+> (`spec.md` *Non-goals*, OQ-3).
+
 ---
 
 id: adb-002

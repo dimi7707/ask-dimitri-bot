@@ -315,8 +315,11 @@ curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" -d
 
 1. **Lambda → Create function → Container image**, selecting the image pushed above.
 2. Handler is baked into the image (`app.main.handler`); no override needed.
-3. **Memory** 1024 MB or more and **timeout** 30 s — the RAG path makes two Bedrock calls plus a
-   database query, and the dependencies are heavy on cold start.
+3. **Memory** 1024 MB or more and **timeout** 30 s — the RAG path makes up to three Bedrock calls
+   (scope classifier, embedding, answer: `chat.py:34`, `:39`, `:51`) plus a database query, and the
+   dependencies are heavy on cold start. That count is what the `BEDROCK_*` call ceiling is sized
+   against: each call is bounded at ~22 s, so this 30 s timeout remains the backstop for the
+   pathological case where several slow calls stack up in one request.
 4. **VPC**: attach the Lambda to the same VPC/private subnets as Aurora, with a security group the
    database accepts. Reaching Bedrock and S3 from private subnets needs either a NAT gateway or
    VPC endpoints (`com.amazonaws.<region>.bedrock-runtime` and an S3 gateway endpoint) — VPC
